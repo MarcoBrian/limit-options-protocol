@@ -1,0 +1,19 @@
+{
+  "name": "limit-options-protocol",
+  "version": "1.0.0",
+  "description": "Building on top of 1inch limit order protocol to extend capabilities and allow for DeFi marketplace of Options contract",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "hardhat": "^2.26.1"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0"
+  }
+}

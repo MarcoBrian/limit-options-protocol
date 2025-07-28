@@ -9,16 +9,10 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-interface IInteractionNotificationReceiver {
-    function notifyInteraction(
-        address taker,
-        uint256 makingAmount,
-        uint256 takingAmount,
-        bytes calldata interactiveData
-    ) external;
-}
+import "../external/limit-order-protocol/contracts/interfaces/ITakerInteraction.sol";
+import "../external/limit-order-protocol/contracts/interfaces/IOrderMixin.sol";
 
-contract OptionNFT is ERC721Enumerable, Ownable, EIP712, IInteractionNotificationReceiver, ReentrancyGuard {
+contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, ReentrancyGuard {
     using ECDSA for bytes32;
 
     struct Option {
@@ -39,10 +33,24 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, IInteractionNotificatio
     mapping(uint256 => Option) public options;
     mapping(address => mapping(uint256 => bool)) public usedNonces; // maker => nonce => used
     
+    // Collateral tracking
+    mapping(uint256 => bool) public collateralProvided; // optionId => collateral status
+    mapping(uint256 => uint256) public collateralTimestamp; // optionId => when collateral was provided
+    
     address public limitOrderProtocol;
+    
+    // Default option parameters for compact mode
+    address public defaultUnderlyingAsset;
+    address public defaultStrikeAsset;
+    uint256 public defaultStrikePrice;
+    uint256 public defaultAmount;
 
     event OptionMinted(uint256 indexed optionId, address indexed to, address indexed maker);
     event OptionExercised(uint256 indexed optionId, address indexed exerciser);
+    event TakerInteractionCalled(address taker, uint256 makingAmount, uint256 takingAmount);
+    event DebugInfo(string message, bytes data);
+    event CollateralProvided(uint256 indexed optionId, address indexed maker, uint256 amount, uint256 timestamp);
+    event CollateralReturned(uint256 indexed optionId, address indexed to, uint256 amount, uint256 timestamp);
 
     constructor(address _limitOrderProtocol) 
         ERC721("OnChainCallOption", "OCCO") 
@@ -61,33 +69,66 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, IInteractionNotificatio
         limitOrderProtocol = _limitOrderProtocol;
     }
 
-    /// @notice Called by LOP after a taker fills the order
-    function notifyInteraction(
-        address taker,
-        uint256,
-        uint256,
-        bytes calldata interactiveData
-    ) external override onlyLimitOrderProtocol {
-        (
-            address underlying,
-            address strikeAsset, 
-            address maker,
-            uint256 strikePrice,
-            uint256 expiry,
-            uint256 amount,
-            uint256 nonce,
-            bytes memory optionSignature
-        ) = abi.decode(interactiveData, (address, address, address, uint256, uint256, uint256, uint256, bytes));
+    function setDefaultOptionParams(
+        address _underlyingAsset,
+        address _strikeAsset,
+        uint256 _strikePrice,
+        uint256 _amount
+    ) external onlyOwner {
+        defaultUnderlyingAsset = _underlyingAsset;
+        defaultStrikeAsset = _strikeAsset;
+        defaultStrikePrice = _strikePrice;
+        defaultAmount = _amount;
+    }
 
-        // Validation
-        require(underlying != address(0) && strikeAsset != address(0), "Invalid assets");
+    /// @notice Called by LOP after a taker fills the order
+    function takerInteraction(
+        IOrderMixin.Order calldata order,
+        bytes calldata extension,
+        bytes32 orderHash,
+        address taker,
+        uint256 makingAmount,
+        uint256 takingAmount,
+        uint256 remainingMakingAmount,
+        bytes calldata extraData
+    ) external override onlyLimitOrderProtocol {
+        // Debug: Log the incoming data
+        emit TakerInteractionCalled(taker, makingAmount, takingAmount);
+        emit DebugInfo("extraData length", abi.encode(extraData.length));
+        
+        // Ultra-compact interaction data - only essential parameters
+        (
+            address maker,
+            uint256 nonce,
+            uint256 expiry, // Add expiry to ensure signature consistency
+            uint8 v,
+            bytes32 r,
+            bytes32 s
+        ) = abi.decode(extraData, (address, uint256, uint256, uint8, bytes32, bytes32));
+
+        emit DebugInfo("decoded maker", abi.encode(maker));
+        emit DebugInfo("decoded nonce", abi.encode(nonce));
+        emit DebugInfo("decoded expiry", abi.encode(expiry));
+
+        // Use default parameters from contract storage
+        address underlying = defaultUnderlyingAsset;
+        address strikeAsset = defaultStrikeAsset;
+        uint256 strikePrice = defaultStrikePrice;
+        uint256 amount = defaultAmount;
+
+        emit DebugInfo("underlying asset", abi.encode(underlying));
+        emit DebugInfo("strike asset", abi.encode(strikeAsset));
+        emit DebugInfo("strike price", abi.encode(strikePrice));
+        emit DebugInfo("amount", abi.encode(amount));
+
+        // Basic validation with detailed error messages
         require(maker != address(0), "Invalid maker");
-        require(strikePrice > 0, "Invalid strike price");
-        require(expiry > block.timestamp, "Already expired");
-        require(amount > 0, "Invalid amount");
+        require(underlying != address(0), "Default underlying asset not set");
+        require(strikeAsset != address(0), "Default strike asset not set");
         require(!usedNonces[maker][nonce], "Nonce already used");
 
-        // Verify signature
+        // Verify signature using the default parameters
+        // NOTE: The signature must be created using these exact same parameters
         bytes32 structHash = keccak256(
             abi.encode(
                 OPTION_TYPEHASH,
@@ -101,8 +142,13 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, IInteractionNotificatio
             )
         );
 
+        emit DebugInfo("structHash", abi.encode(structHash));
+
         bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash));
-        address recovered = digest.recover(optionSignature);
+        emit DebugInfo("digest", abi.encode(digest));
+        
+        address recovered = ecrecover(digest, v, r, s);
+        emit DebugInfo("recovered address", abi.encode(recovered));
         require(maker == recovered, "Invalid signature");
 
         // Mark nonce as used
@@ -123,6 +169,11 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, IInteractionNotificatio
             exercised: false
         });
 
+        // Track collateral provision
+        collateralProvided[optionId] = true;
+        collateralTimestamp[optionId] = block.timestamp;
+        
+        emit CollateralProvided(optionId, maker, amount, block.timestamp);
         _mint(taker, optionId);
         emit OptionMinted(optionId, taker, maker);
     }
@@ -148,6 +199,7 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, IInteractionNotificatio
             "Asset transfer failed"
         );
 
+        emit CollateralReturned(optionId, msg.sender, opt.amount, block.timestamp);
         _burn(optionId);
         emit OptionExercised(optionId, msg.sender);
     }
@@ -162,6 +214,105 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, IInteractionNotificatio
     function isExpired(uint256 optionId) external view returns (bool) {
         require(optionId < nextOptionId, "Option does not exist");
         return block.timestamp > options[optionId].expiry;
+    }
+
+    /// @notice Check if collateral was provided for an option
+    function isCollateralProvided(uint256 optionId) external view returns (bool) {
+        require(optionId < nextOptionId, "Option does not exist");
+        return collateralProvided[optionId];
+    }
+
+    /// @notice Get when collateral was provided for an option
+    function getCollateralTimestamp(uint256 optionId) external view returns (uint256) {
+        require(optionId < nextOptionId, "Option does not exist");
+        require(collateralProvided[optionId], "Collateral not provided");
+        return collateralTimestamp[optionId];
+    }
+
+    /// @notice Get how long collateral has been held for an option
+    function getCollateralDuration(uint256 optionId) external view returns (uint256) {
+        require(optionId < nextOptionId, "Option does not exist");
+        require(collateralProvided[optionId], "Collateral not provided");
+        return block.timestamp - collateralTimestamp[optionId];
+    }
+
+    /// @notice Settle expired options - always auto-exercise (simple version)
+    function settleExpiredOption(uint256 optionId) external {
+        Option storage opt = options[optionId];
+        require(optionId < nextOptionId, "Option does not exist");
+        require(block.timestamp > opt.expiry, "Option not expired yet");
+        require(!opt.exercised, "Option already exercised");
+        require(collateralProvided[optionId], "Collateral not provided");
+
+        opt.exercised = true;
+        address optionHolder = ownerOf(optionId);
+        
+        // Auto-exercise: Option holder pays strike price and receives underlying
+        require(
+            IERC20(opt.strikeAsset).transferFrom(optionHolder, opt.maker, opt.strikePrice),
+            "Strike payment failed"
+        );
+
+        require(
+            IERC20(opt.underlyingAsset).transfer(optionHolder, opt.amount),
+            "Asset transfer failed"
+        );
+
+        emit CollateralReturned(optionId, optionHolder, opt.amount, block.timestamp);
+        _burn(optionId);
+        emit OptionExercised(optionId, optionHolder);
+    }
+
+    /// @notice Batch settle multiple expired options
+    function batchSettleExpiredOptions(uint256[] calldata optionIds) external {
+        for (uint256 i = 0; i < optionIds.length; i++) {
+            uint256 optionId = optionIds[i];
+            Option storage opt = options[optionId];
+            
+            // Skip if already handled
+            if (optionId >= nextOptionId || opt.exercised || block.timestamp <= opt.expiry) {
+                continue;
+            }
+
+            opt.exercised = true;
+            address optionHolder = ownerOf(optionId);
+
+            // Auto-exercise: Option holder pays strike price and receives underlying
+            require(
+                IERC20(opt.strikeAsset).transferFrom(optionHolder, opt.maker, opt.strikePrice),
+                "Strike payment failed"
+            );
+
+            require(
+                IERC20(opt.underlyingAsset).transfer(optionHolder, opt.amount),
+                "Asset transfer failed"
+            );
+
+            emit CollateralReturned(optionId, optionHolder, opt.amount, block.timestamp);
+            _burn(optionId);
+            emit OptionExercised(optionId, optionHolder);
+        }
+    }
+
+    /// @notice Get all expired options that need settlement
+    function getExpiredOptions(uint256 startIndex, uint256 maxCount) external view returns (uint256[] memory) {
+        uint256[] memory expiredOptions = new uint256[](maxCount);
+        uint256 count = 0;
+        
+        for (uint256 i = startIndex; i < nextOptionId && count < maxCount; i++) {
+            Option storage opt = options[i];
+            if (block.timestamp > opt.expiry && !opt.exercised) {
+                expiredOptions[count] = i;
+                count++;
+            }
+        }
+        
+        // Resize array to actual count
+        assembly {
+            mstore(expiredOptions, count)
+        }
+        
+        return expiredOptions;
     }
 
     /// @notice Emergency withdraw function (only owner)

@@ -8,15 +8,16 @@ contract MockERC20 is ERC20 {
     
     constructor(
         string memory name,
-        string memory symbol,
-        uint8 decimals_,
-        uint256 totalSupply
+        string memory symbol
     ) ERC20(name, symbol) {
-        _decimals = decimals_;
-        _mint(msg.sender, totalSupply);
+        _decimals = 18;
     }
     
     function decimals() public view virtual override returns (uint8) {
         return _decimals;
+    }
+    
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
     }
 } 

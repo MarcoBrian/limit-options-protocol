@@ -1,0 +1,3 @@
+[submodule "external/limit-order-protocol"]
+	path = external/limit-order-protocol
+	url = https://github.com/MarcoBrian/limit-order-protocol.git

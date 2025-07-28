@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("OptionNFT (Ethers v6)", function () {
+describe("OptionNFT", function () {
   let optionNFT;
   let deployer;
   let user;

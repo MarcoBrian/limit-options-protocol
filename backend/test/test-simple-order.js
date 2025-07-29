@@ -16,10 +16,10 @@ const {
   buildCompleteCallOption,
   buildOrder,
   signOrder
-} = require('../scripts/helpers/orderBuilder');
+} = require('../../scripts/helpers/orderBuilder');
 
 // Import nonce manager
-const { createNonceManager } = require('../scripts/helpers/nonceManager');
+const { createNonceManager } = require('../../scripts/helpers/nonceManager');
 
 /**
  * Create an options order with option_params using the builder functions

@@ -1,21 +1,49 @@
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
 
 let db;
 
 function getDatabase() {
   if (!db) {
     const dbPath = path.join(__dirname, '../data/orders.db');
-    db = new sqlite3.Database(dbPath);
     
-    // Enable WAL mode for better concurrency
-    db.run('PRAGMA journal_mode = WAL');
-    db.run('PRAGMA synchronous = NORMAL');
-    db.run('PRAGMA cache_size = 10000');
-    db.run('PRAGMA temp_store = MEMORY');
+    // Ensure the data directory exists
+    const dataDir = path.dirname(dbPath);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+      console.log(`✅ Created data directory: ${dataDir}`);
+    }
     
-    // Set busy timeout to handle concurrent access
-    db.configure('busyTimeout', 30000); // 30 seconds
+    console.log(`🔧 Database path: ${dbPath}`);
+    console.log(`🔧 Data directory: ${dataDir}`);
+    console.log(`🔧 Directory exists: ${fs.existsSync(dataDir)}`);
+    
+    try {
+      db = new sqlite3.Database(dbPath, (err) => {
+        if (err) {
+          console.error('❌ Error opening database:', err);
+          console.error('❌ Database path:', dbPath);
+          console.error('❌ Current directory:', process.cwd());
+          console.error('❌ __dirname:', __dirname);
+        } else {
+          console.log(`✅ Database opened successfully: ${dbPath}`);
+        }
+      });
+      
+      // Enable WAL mode for better concurrency
+      db.run('PRAGMA journal_mode = WAL');
+      db.run('PRAGMA synchronous = NORMAL');
+      db.run('PRAGMA cache_size = 10000');
+      db.run('PRAGMA temp_store = MEMORY');
+      
+      // Set busy timeout to handle concurrent access
+      db.configure('busyTimeout', 30000); // 30 seconds
+      
+    } catch (error) {
+      console.error('❌ Error creating database connection:', error);
+      throw error;
+    }
   }
   return db;
 }

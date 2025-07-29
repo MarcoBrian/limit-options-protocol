@@ -68,8 +68,6 @@ router.post('/', validateOrderData, validateOrderSignature, async (req, res) => 
     // Insert order into database
     const result = await insertOrder(orderData);
 
-    console.log(`✅ Order stored successfully: ${orderHash}`);
-
     res.status(201).json({
       success: true,
       message: 'Order accepted and stored',

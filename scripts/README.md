@@ -219,6 +219,143 @@ await cleanupDummyTokens(dummyToken.address, taker.address);
 3. **Signatures**: Dual signing required (LOP order + OptionsNFT parameters)
 4. **Partial Fills**: Prevented at protocol level using maker traits
 5. **Exercise Rights**: Only NFT holder can exercise options before expiry
+6. **Nonce Management**: Critical for preventing replay attacks - see Nonce Management section below
+
+## 🔢 Nonce Management Solutions
+
+### The Problem
+Traditional nonce management in options protocols can be problematic:
+- **Hardcoded Nonces**: `const nonce = 1;` leads to replay attacks
+- **No Tracking**: Makers can't easily know their next available nonce
+- **Race Conditions**: Multiple orders with same nonce can cause conflicts
+- **Manual Management**: Error-prone and not production-ready
+
+### Our Solutions
+
+#### 1. **Automatic Nonce Fetching** (Recommended)
+```javascript
+// Let the system auto-fetch the correct nonce
+const orderData = await buildCompleteCallOption({
+  makerSigner: maker,
+  // ... other params
+  // No nonce specified - will auto-fetch from contract
+});
+console.log(`Auto-fetched nonce: ${orderData.nonce}`);
+```
+
+#### 2. **NonceManager Helper Class**
+```javascript
+const { createNonceManager } = require("./helpers/nonceManager");
+
+const nonceManager = createNonceManager(optionsNFT.target);
+
+// Get next available nonce
+const nonce = await nonceManager.getNextNonce(maker.address);
+
+// Validate nonce before use
+const isValid = await nonceManager.validateNonce(maker.address, nonce);
+
+// Get comprehensive nonce info
+const info = await nonceManager.getNonceInfo(maker.address);
+```
+
+#### 3. **Contract-Level Nonce Functions**
+```solidity
+// Get next available nonce for a maker
+function getNextNonce(address maker) external view returns (uint256);
+
+// Check if nonce is available
+function isNonceAvailable(address maker, uint256 nonce) external view returns (bool);
+
+// Get current nonce (last used + 1)
+function getCurrentNonce(address maker) external view returns (uint256);
+```
+
+#### 4. **Independent Nonce Management** (Production Ready)
+Our protocol uses completely independent nonce management:
+```javascript
+// Get next available nonce from OptionsNFT
+const nonce = await optionsNFT.getNextNonce(maker.address);
+
+// Check if nonce is available
+const isAvailable = await optionsNFT.isNonceAvailable(maker.address, nonce);
+
+// Advance nonce (for testing)
+await optionsNFT.connect(maker).advanceNonce(maker.address, 1);
+```
+
+### Nonce Management Strategies
+
+#### **Strategy 1: Manual Management**
+```javascript
+const nonce = await nonceManager.getNextNonce(maker.address);
+const orderData = await buildCompleteCallOption({
+  // ... params
+  nonce: nonce
+});
+```
+
+#### **Strategy 2: Auto-Fetch (Recommended)**
+```javascript
+const orderData = await buildCompleteCallOption({
+  // ... params
+  // No nonce - auto-fetched
+});
+```
+
+#### **Strategy 3: Validation Before Use**
+```javascript
+const nonce = await nonceManager.getNextNonce(maker.address);
+const isValid = await nonceManager.validateNonce(maker.address, nonce);
+if (!isValid) {
+  throw new Error(`Invalid nonce ${nonce}`);
+}
+```
+
+#### **Strategy 4: Multiple Orders**
+```javascript
+// Handle nonce progression for multiple orders
+for (let i = 0; i < 3; i++) {
+  const currentNonce = await nonceManager.getNextNonce(maker.address);
+  const orderData = await buildCompleteCallOption({
+    // ... params
+    nonce: currentNonce
+  });
+  // Fill order to consume nonce
+  await fillCallOption({ orderData, ... });
+}
+```
+
+### Testing Nonce Management
+Run the dedicated nonce management test:
+```bash
+npx hardhat run scripts/test-nonce-management.js
+```
+
+This test demonstrates:
+- ✅ Manual nonce retrieval
+- ✅ Auto-fetch functionality
+- ✅ Nonce validation
+- ✅ Multiple order handling
+- ✅ Error handling for invalid nonces
+- ✅ Nonce progression tracking
+
+### Production Considerations
+
+1. **Independent Management**: Uses protocol-specific nonce tracking
+2. **Error Handling**: Always validate nonces before use
+3. **Monitoring**: Track nonce usage for analytics
+4. **Security**: Never reuse nonces or expose them in logs
+5. **Gas Optimization**: Efficient nonce tracking and validation
+
+### Nonce Flow Example
+```
+1. Maker calls getNextNonce() → Returns 5
+2. Maker signs order with nonce 5
+3. Taker fills order → Nonce 5 marked as used
+4. Next getNextNonce() call → Returns 6
+5. Process continues with nonce progression
+```
 
 ## 🔍 Troubleshooting
 

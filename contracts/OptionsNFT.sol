@@ -31,7 +31,10 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
 
     uint256 public nextOptionId;
     mapping(uint256 => Option) public options;
-    mapping(address => mapping(uint256 => bool)) public usedNonces; // maker => nonce => used
+    
+    // INDEPENDENT nonce management for OptionsNFT
+    mapping(address => uint256) public optionNonces; // maker => current nonce
+    mapping(address => mapping(uint256 => bool)) public usedOptionNonces; // maker => nonce => used
     
     // Collateral tracking
     mapping(uint256 => bool) public collateralProvided; // optionId => collateral status
@@ -51,6 +54,7 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
     event DebugInfo(string message, bytes data);
     event CollateralProvided(uint256 indexed optionId, address indexed maker, uint256 amount, uint256 timestamp);
     event CollateralReturned(uint256 indexed optionId, address indexed to, uint256 amount, uint256 timestamp);
+    event OptionNonceUsed(address indexed maker, uint256 nonce);
 
     constructor(address _limitOrderProtocol) 
         ERC721("OnChainCallOption", "OCCO") 
@@ -124,7 +128,10 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         require(strikeAsset != address(0), "Invalid strike asset");
         require(strikePrice > 0, "Invalid strike price");
         require(amount > 0, "Invalid amount");
-        require(!usedNonces[maker][nonce], "Nonce already used");
+        
+        // INDEPENDENT nonce validation for OptionsNFT
+        require(!usedOptionNonces[maker][nonce], "Option nonce already used");
+        require(nonce >= optionNonces[maker], "Nonce too low");
 
         // FIXED: Verify signature using actual parameters from signature
         bytes32 structHash = keccak256(
@@ -149,8 +156,10 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         emit DebugInfo("recovered address", abi.encode(recovered));
         require(maker == recovered, "Invalid signature");
 
-        // Mark nonce as used
-        usedNonces[maker][nonce] = true;
+        // Mark nonce as used and update current nonce
+        usedOptionNonces[maker][nonce] = true;
+        optionNonces[maker] = nonce + 1; // Next nonce should be higher
+        emit OptionNonceUsed(maker, nonce);
 
         // Pull collateral from maker using actual amount from signature
         require(IERC20(underlyingAsset).transferFrom(maker, address(this), amount), "Transfer failed");
@@ -316,5 +325,67 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
     /// @notice Emergency withdraw function (only owner)
     function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
         IERC20(token).transfer(owner(), amount);
+    }
+
+    /// @notice Get the next available nonce for a maker
+    /// @param maker The maker address
+    /// @return The next available nonce
+    function getNextNonce(address maker) external view returns (uint256) {
+        return optionNonces[maker];
+    }
+
+    /// @notice Get the next available nonce for a maker (gas optimized)
+    /// @param maker The maker address
+    /// @param startNonce The starting nonce to check from
+    /// @return The next available nonce
+    function getNextNonceFrom(address maker, uint256 startNonce) external view returns (uint256) {
+        uint256 nonce = startNonce;
+        while (usedOptionNonces[maker][nonce]) {
+            nonce++;
+            // Prevent infinite loops
+            if (nonce > startNonce + 1000) {
+                revert("Nonce search limit exceeded");
+            }
+        }
+        return nonce;
+    }
+
+    /// @notice Get the current nonce for a maker (last used + 1)
+    /// @param maker The maker address
+    /// @return The current nonce
+    function getCurrentNonce(address maker) external view returns (uint256) {
+        return optionNonces[maker];
+    }
+
+    /// @notice Check if a nonce is available for a maker
+    /// @param maker The maker address
+    /// @param nonce The nonce to check
+    /// @return True if the nonce is available
+    function isNonceAvailable(address maker, uint256 nonce) external view returns (bool) {
+        return !usedOptionNonces[maker][nonce] && nonce >= optionNonces[maker];
+    }
+
+    /// @notice Advance nonce for a maker (for testing/debugging)
+    /// @param maker The maker address
+    /// @param amount The amount to advance by
+    function advanceNonce(address maker, uint256 amount) external {
+        require(msg.sender == maker || msg.sender == owner(), "Not authorized");
+        optionNonces[maker] += amount;
+    }
+
+    // Alternative approach: Track used order hashes instead of nonces
+    mapping(bytes32 => bool) public usedOrderHashes; // orderHash => used
+
+    /// @notice Alternative: Use order hash instead of nonce for replay protection
+    /// @param orderHash The hash of the order to check
+    /// @return True if the order hash is available
+    function isOrderHashAvailable(bytes32 orderHash) external view returns (bool) {
+        return !usedOrderHashes[orderHash];
+    }
+
+    /// @notice Alternative: Mark order hash as used
+    /// @param orderHash The hash of the order to mark as used
+    function markOrderHashUsed(bytes32 orderHash) external onlyLimitOrderProtocol {
+        usedOrderHashes[orderHash] = true;
     }
 } 

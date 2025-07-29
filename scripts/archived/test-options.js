@@ -1,3 +1,5 @@
+// Test script to test simple Options NFT for prototyping
+
 const { ethers } = require("hardhat");
 
 // Helper to encode address as 32-byte left-padded hex string (1inch Address type)

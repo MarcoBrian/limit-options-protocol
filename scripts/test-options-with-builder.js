@@ -4,8 +4,10 @@ const {
   fillCallOption,
   deployDummyOptionToken,
   setupDummyTokensForMaker,
-  cleanupDummyTokens
+  cleanupDummyTokens,
+  getNextNonce
 } = require("./helpers/orderBuilder");
+const { createNonceManager } = require("./helpers/nonceManager");
 
 async function main() {
   console.log("🚀 Testing ETH Call Option with OrderBuilder (Dummy Token Approach)");
@@ -91,6 +93,26 @@ async function main() {
     lopAddress: lop.target,
     optionAmount
   });
+
+  // Demonstrate nonce management
+  console.log("\n🔢 Testing nonce management...");
+  const nonceManager = createNonceManager(optionsNFT.target);
+  
+  // Get nonce info for maker
+  const nonceInfo = await nonceManager.getNonceInfo(maker.address);
+  console.log("Nonce Information:");
+  console.log(`- Maker: ${nonceInfo.maker}`);
+  console.log(`- Next Nonce: ${nonceInfo.nextNonce}`);
+  console.log(`- Current Nonce: ${nonceInfo.currentNonce}`);
+  console.log(`- Is Available: ${nonceInfo.isAvailable}`);
+  
+  // Validate nonce
+  const isValidNonce = await nonceManager.validateNonce(maker.address, nonceInfo.nextNonce);
+  console.log(`- Nonce ${nonceInfo.nextNonce} is valid: ${isValidNonce}`);
+  
+  // Get recommended nonce
+  const recommendedNonce = await nonceManager.getRecommendedNonce(maker.address);
+  console.log(`- Recommended nonce: ${recommendedNonce}`);
 
   // Build complete call option using orderBuilder
   console.log("\n📝 Building complete call option order...");

@@ -96,48 +96,46 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         emit TakerInteractionCalled(taker, makingAmount, takingAmount);
         emit DebugInfo("extraData length", abi.encode(extraData.length));
         
-        // Ultra-compact interaction data - only essential parameters
+        // FIXED: Decode all parameters from interaction data (not just signature components)
         (
             address maker,
-            uint256 nonce,
-            uint256 expiry, // Add expiry to ensure signature consistency
+            address underlyingAsset,    // ← From signature
+            address strikeAsset,        // ← From signature  
+            uint256 strikePrice,        // ← From signature
+            uint256 expiry,            // ← From signature
+            uint256 amount,            // ← From signature
+            uint256 nonce,             // ← From signature
             uint8 v,
             bytes32 r,
             bytes32 s
-        ) = abi.decode(extraData, (address, uint256, uint256, uint8, bytes32, bytes32));
+        ) = abi.decode(extraData, (address, address, address, uint256, uint256, uint256, uint256, uint8, bytes32, bytes32));
 
         emit DebugInfo("decoded maker", abi.encode(maker));
-        emit DebugInfo("decoded nonce", abi.encode(nonce));
+        emit DebugInfo("decoded underlyingAsset", abi.encode(underlyingAsset));
+        emit DebugInfo("decoded strikeAsset", abi.encode(strikeAsset));
+        emit DebugInfo("decoded strikePrice", abi.encode(strikePrice));
         emit DebugInfo("decoded expiry", abi.encode(expiry));
+        emit DebugInfo("decoded amount", abi.encode(amount));
+        emit DebugInfo("decoded nonce", abi.encode(nonce));
 
-        // Use default parameters from contract storage
-        address underlying = defaultUnderlyingAsset;
-        address strikeAsset = defaultStrikeAsset;
-        uint256 strikePrice = defaultStrikePrice;
-        uint256 amount = defaultAmount;
-
-        emit DebugInfo("underlying asset", abi.encode(underlying));
-        emit DebugInfo("strike asset", abi.encode(strikeAsset));
-        emit DebugInfo("strike price", abi.encode(strikePrice));
-        emit DebugInfo("amount", abi.encode(amount));
-
-        // Basic validation with detailed error messages
+        // FIXED: Basic validation using actual parameters from signature
         require(maker != address(0), "Invalid maker");
-        require(underlying != address(0), "Default underlying asset not set");
-        require(strikeAsset != address(0), "Default strike asset not set");
+        require(underlyingAsset != address(0), "Invalid underlying asset");
+        require(strikeAsset != address(0), "Invalid strike asset");
+        require(strikePrice > 0, "Invalid strike price");
+        require(amount > 0, "Invalid amount");
         require(!usedNonces[maker][nonce], "Nonce already used");
 
-        // Verify signature using the default parameters
-        // NOTE: The signature must be created using these exact same parameters
+        // FIXED: Verify signature using actual parameters from signature
         bytes32 structHash = keccak256(
             abi.encode(
                 OPTION_TYPEHASH,
-                underlying,
-                strikeAsset,
+                underlyingAsset,  // ← From signature
+                strikeAsset,      // ← From signature
                 maker,
-                strikePrice,
-                expiry,
-                amount,
+                strikePrice,      // ← From signature
+                expiry,           // ← From signature
+                amount,           // ← From signature
                 nonce
             )
         );
@@ -154,18 +152,18 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         // Mark nonce as used
         usedNonces[maker][nonce] = true;
 
-        // Pull collateral from maker
-        require(IERC20(underlying).transferFrom(maker, address(this), amount), "Transfer failed");
+        // Pull collateral from maker using actual amount from signature
+        require(IERC20(underlyingAsset).transferFrom(maker, address(this), amount), "Transfer failed");
 
-        // Mint option NFT to taker
+        // Mint option NFT to taker using actual parameters from signature
         uint256 optionId = nextOptionId++;
         options[optionId] = Option({
-            underlyingAsset: underlying,
-            strikeAsset: strikeAsset,
+            underlyingAsset: underlyingAsset,  // ← From signature
+            strikeAsset: strikeAsset,          // ← From signature
             maker: maker,
-            strikePrice: strikePrice,
-            expiry: expiry,
-            amount: amount,
+            strikePrice: strikePrice,          // ← From signature
+            expiry: expiry,                    // ← From signature
+            amount: amount,                    // ← From signature
             exercised: false
         });
 

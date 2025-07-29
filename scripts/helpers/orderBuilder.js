@@ -10,6 +10,27 @@ function toAddressType(addr) {
 function setMakerTraits(flags = {}) {
   let traits = 0n;
   
+  // Encode nonce in bits [120-159] (40 bits)
+  if (flags.nonce !== undefined) {
+    traits |= (BigInt(flags.nonce) << 120n);
+  }
+  
+  // Encode expiry in bits [80-119] (40 bits)
+  if (flags.expiry !== undefined) {
+    traits |= (BigInt(flags.expiry) << 80n);
+  }
+  
+  // Encode allowed sender in bits [0-79] (80 bits)
+  if (flags.allowedSender && flags.allowedSender !== "0x0000000000000000000000000000000000000000") {
+    traits |= (BigInt(flags.allowedSender) & ((1n << 80n) - 1n));
+  }
+  
+  // Encode series in bits [160-199] (40 bits)
+  if (flags.series !== undefined) {
+    traits |= (BigInt(flags.series) << 160n);
+  }
+  
+  // Set flags (high bits)
   if (flags.postInteraction) {
     traits |= (1n << 251n); // POST_INTERACTION_CALL_FLAG
   }
@@ -164,6 +185,7 @@ async function signOrder(order, signer, lopAddress, originalAddresses) {
  * @param {string|number} params.premium - Premium in strike asset units
  * @param {number} params.expiry - Expiry timestamp
  * @param {Object} params.makerTraits - Maker traits flags
+ * @param {number} params.lopNonce - LOP nonce for bit invalidator (optional, will auto-generate if not provided)
  * @returns {Object} Order object with tuple
  */
 function buildCallOptionOrder(params) {
@@ -176,8 +198,12 @@ function buildCallOptionOrder(params) {
     optionAmount,
     premium,
     expiry,
-    makerTraits = {}
+    makerTraits = {},
+    lopNonce
   } = params;
+
+  // Generate LOP nonce if not provided
+  const finalLopNonce = lopNonce !== undefined ? lopNonce : getNextLopNonce(maker);
 
   // For call options with dummy token approach:
   // - Maker offers dummy tokens (placeholder, gets transferred to taker)
@@ -191,7 +217,10 @@ function buildCallOptionOrder(params) {
     makingAmount: optionAmount,       // ✅ Amount of dummy tokens to transfer
     takingAmount: premium,            // Taker pays premium
     receiver: maker,                  // Maker receives premium
-    makerTraits
+    makerTraits: {
+      ...makerTraits,
+      nonce: finalLopNonce  // Set LOP nonce for bit invalidator
+    }
   });
 
   return {
@@ -204,7 +233,8 @@ function buildCallOptionOrder(params) {
       optionAmount: ethers.getBigInt(optionAmount),
       premium: ethers.getBigInt(premium),
       expiry: BigInt(expiry)
-    }
+    },
+    lopNonce: finalLopNonce
   };
 }
 
@@ -322,7 +352,84 @@ function buildOptionsNFTInteraction(params) {
 }
 
 /**
- * Complete call option order builder
+ * Get the next available nonce for a maker from the OptionsNFT contract
+ * @param {string} makerAddress - Maker address
+ * @param {string} optionsNFTAddress - OptionsNFT contract address
+ * @returns {Promise<number>} Next available nonce
+ */
+async function getNextNonce(makerAddress, optionsNFTAddress) {
+  const optionsNFT = await ethers.getContractAt("OptionNFT", optionsNFTAddress);
+  const nonce = await optionsNFT.getNextNonce(makerAddress);
+  return Number(nonce);
+}
+
+// LOP nonce tracking per maker
+const lopNonceTracker = new Map();
+
+/**
+ * Get the next available LOP nonce for a maker
+ * @param {string} makerAddress - Maker address
+ * @returns {number} Next available LOP nonce
+ */
+function getNextLopNonce(makerAddress) {
+  const currentNonce = lopNonceTracker.get(makerAddress) || 0;
+  const nextNonce = currentNonce + 1;
+  lopNonceTracker.set(makerAddress, nextNonce);
+  return nextNonce;
+}
+
+/**
+ * Reset LOP nonce for a maker (useful for testing)
+ * @param {string} makerAddress - Maker address
+ * @param {number} nonce - Nonce to set (optional, defaults to 0)
+ */
+function resetLopNonce(makerAddress, nonce = 0) {
+  lopNonceTracker.set(makerAddress, nonce);
+}
+
+/**
+ * Get the next available LOP nonce from SeriesNonceManager
+ * @param {string} makerAddress - Maker address
+ * @param {string} seriesNonceManagerAddress - SeriesNonceManager contract address
+ * @param {number} series - Series number (default: 0)
+ * @returns {Promise<number>} Next available LOP nonce
+ */
+async function getNextLopNonceFromSeries(makerAddress, seriesNonceManagerAddress, series = 0) {
+  const seriesNonceManager = await ethers.getContractAt("SeriesNonceManager", seriesNonceManagerAddress);
+  const currentNonce = await seriesNonceManager.nonce(series, makerAddress);
+  return Number(currentNonce);
+}
+
+/**
+ * Advance LOP nonce in SeriesNonceManager
+ * @param {Object} signer - Signer object
+ * @param {string} seriesNonceManagerAddress - SeriesNonceManager contract address
+ * @param {number} series - Series number (default: 0)
+ * @param {number} amount - Amount to advance (default: 1)
+ * @returns {Promise<Object>} Transaction result
+ */
+async function advanceLopNonce(signer, seriesNonceManagerAddress, series = 0, amount = 1) {
+  const seriesNonceManager = await ethers.getContractAt("SeriesNonceManager", seriesNonceManagerAddress);
+  const tx = await seriesNonceManager.connect(signer).advanceNonce(series, amount);
+  return tx;
+}
+
+/**
+ * Check if LOP nonce equals expected value in SeriesNonceManager
+ * @param {string} makerAddress - Maker address
+ * @param {string} seriesNonceManagerAddress - SeriesNonceManager contract address
+ * @param {number} series - Series number (default: 0)
+ * @param {number} expectedNonce - Expected nonce value
+ * @returns {Promise<boolean>} True if nonce equals expected value
+ */
+async function checkLopNonceEquals(makerAddress, seriesNonceManagerAddress, series = 0, expectedNonce) {
+  const seriesNonceManager = await ethers.getContractAt("SeriesNonceManager", seriesNonceManagerAddress);
+  const equals = await seriesNonceManager.nonceEquals(series, makerAddress, expectedNonce);
+  return equals;
+}
+
+/**
+ * Complete call option order builder with automatic nonce management
  * @param {Object} params - Complete call option parameters
  * @param {Object} params.makerSigner - Maker signer object
  * @param {string} params.underlyingAsset - Underlying asset address
@@ -334,7 +441,8 @@ function buildOptionsNFTInteraction(params) {
  * @param {number} params.expiry - Expiry timestamp
  * @param {string} params.lopAddress - LOP contract address
  * @param {string} params.optionsNFTAddress - OptionsNFT contract address
- * @param {number} params.nonce - Nonce for signature
+ * @param {number} params.nonce - Nonce for signature (optional, will auto-fetch if not provided)
+ * @param {number} params.lopNonce - LOP nonce for bit invalidator (optional, will auto-generate if not provided)
  * @returns {Object} Complete order with signatures
  */
 async function buildCompleteCallOption(params) {
@@ -349,8 +457,16 @@ async function buildCompleteCallOption(params) {
     expiry,
     lopAddress,
     optionsNFTAddress,
-    nonce = 1
+    nonce,
+    lopNonce
   } = params;
+
+  // Auto-fetch nonce if not provided
+  let finalNonce = nonce;
+  if (finalNonce === undefined) {
+    finalNonce = await getNextNonce(makerSigner.address, optionsNFTAddress);
+    console.log(`🔢 Auto-fetched nonce: ${finalNonce} for maker ${makerSigner.address}`);
+  }
 
   // 1. Build the LOP order
   const orderResult = buildCallOptionOrder({
@@ -361,7 +477,8 @@ async function buildCompleteCallOption(params) {
     strikePrice,
     optionAmount,
     premium,
-    expiry
+    expiry,
+    lopNonce
   });
 
   // 2. Sign the LOP order
@@ -372,7 +489,7 @@ async function buildCompleteCallOption(params) {
     orderResult.optionParams,
     makerSigner,
     optionsNFTAddress,
-    nonce
+    finalNonce
   );
 
   // 4. Build interaction data
@@ -389,7 +506,9 @@ async function buildCompleteCallOption(params) {
     optionParams: orderResult.optionParams,
     lopSignature,
     optionsNFTSignature,
-    interaction
+    interaction,
+    nonce: finalNonce,
+    lopNonce: orderResult.lopNonce
   };
 }
 
@@ -489,5 +608,11 @@ module.exports = {
   fillCallOption,
   deployDummyOptionToken,
   setupDummyTokensForMaker,
-  cleanupDummyTokens
+  cleanupDummyTokens,
+  getNextNonce,
+  getNextLopNonce,
+  resetLopNonce,
+  getNextLopNonceFromSeries,
+  advanceLopNonce,
+  checkLopNonceEquals
 }; 

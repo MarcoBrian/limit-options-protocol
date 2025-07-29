@@ -12,6 +12,12 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../external/limit-order-protocol/contracts/interfaces/ITakerInteraction.sol";
 import "../external/limit-order-protocol/contracts/interfaces/IOrderMixin.sol";
 
+// Interface for SeriesNonceManager
+interface ISeriesNonceManager {
+    function nonce(uint256 series, address maker) external view returns (uint256);
+    function advanceNonce(uint256 series, uint256 amount) external;
+}
+
 contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, ReentrancyGuard {
     using ECDSA for bytes32;
 
@@ -38,6 +44,7 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
     mapping(uint256 => uint256) public collateralTimestamp; // optionId => when collateral was provided
     
     address public limitOrderProtocol;
+    address public seriesNonceManager; // Add SeriesNonceManager integration
     
     // Default option parameters for compact mode
     address public defaultUnderlyingAsset;
@@ -67,6 +74,10 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
 
     function setLimitOrderProtocol(address _limitOrderProtocol) external onlyOwner {
         limitOrderProtocol = _limitOrderProtocol;
+    }
+
+    function setSeriesNonceManager(address _seriesNonceManager) external onlyOwner {
+        seriesNonceManager = _seriesNonceManager;
     }
 
     function setDefaultOptionParams(
@@ -316,5 +327,93 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
     /// @notice Emergency withdraw function (only owner)
     function emergencyWithdraw(address token, uint256 amount) external onlyOwner {
         IERC20(token).transfer(owner(), amount);
+    }
+
+    /// @notice Get the next available nonce for a maker (optimized)
+    /// @param maker The maker address
+    /// @return The next available nonce
+    function getNextNonce(address maker) external view returns (uint256) {
+        // If SeriesNonceManager is set, use it for series 0
+        if (seriesNonceManager != address(0)) {
+            try this.getNextNonceFromSeries(maker, 0) returns (uint256 nonce) {
+                return nonce;
+            } catch {
+                // Fallback to internal tracking
+            }
+        }
+        
+        // Optimized fallback to internal nonce tracking
+        // Start from 0 and find the first unused nonce
+        uint256 nonce = 0;
+        while (usedNonces[maker][nonce]) {
+            nonce++;
+            // Prevent infinite loops (though practically impossible)
+            if (nonce > 1000000) {
+                revert("Nonce overflow");
+            }
+        }
+        return nonce;
+    }
+
+    /// @notice Get the next available nonce for a maker (gas optimized)
+    /// @param maker The maker address
+    /// @param startNonce The starting nonce to check from
+    /// @return The next available nonce
+    function getNextNonceFrom(address maker, uint256 startNonce) external view returns (uint256) {
+        uint256 nonce = startNonce;
+        while (usedNonces[maker][nonce]) {
+            nonce++;
+            // Prevent infinite loops
+            if (nonce > startNonce + 1000) {
+                revert("Nonce search limit exceeded");
+            }
+        }
+        return nonce;
+    }
+
+    /// @notice Get the next available nonce for a maker from SeriesNonceManager
+    /// @param maker The maker address
+    /// @param series The series number
+    /// @return The next available nonce
+    function getNextNonceFromSeries(address maker, uint256 series) external view returns (uint256) {
+        require(seriesNonceManager != address(0), "SeriesNonceManager not set");
+        
+        ISeriesNonceManager nonceManager = ISeriesNonceManager(seriesNonceManager);
+        return nonceManager.nonce(series, maker);
+    }
+
+    /// @notice Get the current nonce for a maker (last used + 1)
+    /// @param maker The maker address
+    /// @return The current nonce
+    function getCurrentNonce(address maker) external view returns (uint256) {
+        uint256 nonce = 0;
+        while (usedNonces[maker][nonce]) {
+            nonce++;
+        }
+        return nonce;
+    }
+
+    /// @notice Check if a nonce is available for a maker
+    /// @param maker The maker address
+    /// @param nonce The nonce to check
+    /// @return True if the nonce is available
+    function isNonceAvailable(address maker, uint256 nonce) external view returns (bool) {
+        return !usedNonces[maker][nonce];
+    }
+
+    // Alternative approach: Track used order hashes instead of nonces
+    mapping(bytes32 => bool) public usedOrderHashes; // orderHash => used
+
+    /// @notice Alternative: Use order hash instead of nonce for replay protection
+    /// @param orderHash The hash of the order to check
+    /// @return True if the order hash is available
+    function isOrderHashAvailable(bytes32 orderHash) external view returns (bool) {
+        return !usedOrderHashes[orderHash];
+    }
+
+    /// @notice Alternative: Mark order hash as used
+    /// @param orderHash The hash of the order to mark as used
+    function markOrderHashUsed(bytes32 orderHash) external onlyLimitOrderProtocol {
+        usedOrderHashes[orderHash] = true;
     }
 } 

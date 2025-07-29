@@ -271,19 +271,17 @@ function isNonceAvailable(address maker, uint256 nonce) external view returns (b
 function getCurrentNonce(address maker) external view returns (uint256);
 ```
 
-#### 4. **SeriesNonceManager Integration** (Advanced)
-For production deployments, integrate with 1inch's SeriesNonceManager:
+#### 4. **Independent Nonce Management** (Production Ready)
+Our protocol uses completely independent nonce management:
 ```javascript
-// Deploy SeriesNonceManager
-const SeriesNonceManager = await ethers.getContractFactory("SeriesNonceManager");
-const seriesNonceManager = await SeriesNonceManager.deploy();
+// Get next available nonce from OptionsNFT
+const nonce = await optionsNFT.getNextNonce(maker.address);
 
-// Set it in OptionsNFT
-await optionsNFT.setSeriesNonceManager(seriesNonceManager.target);
+// Check if nonce is available
+const isAvailable = await optionsNFT.isNonceAvailable(maker.address, nonce);
 
-// Use series-based nonces
-const nonceManager = createNonceManager(optionsNFT.target, seriesNonceManager.target);
-const seriesNonce = await nonceManager.getSeriesNonce(maker.address, 0);
+// Advance nonce (for testing)
+await optionsNFT.connect(maker).advanceNonce(maker.address, 1);
 ```
 
 ### Nonce Management Strategies
@@ -344,11 +342,11 @@ This test demonstrates:
 
 ### Production Considerations
 
-1. **Gas Optimization**: Use SeriesNonceManager for batch operations
+1. **Independent Management**: Uses protocol-specific nonce tracking
 2. **Error Handling**: Always validate nonces before use
 3. **Monitoring**: Track nonce usage for analytics
-4. **Fallbacks**: Have backup nonce management strategies
-5. **Security**: Never reuse nonces or expose them in logs
+4. **Security**: Never reuse nonces or expose them in logs
+5. **Gas Optimization**: Efficient nonce tracking and validation
 
 ### Nonce Flow Example
 ```

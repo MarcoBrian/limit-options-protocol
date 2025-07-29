@@ -352,15 +352,41 @@ function buildOptionsNFTInteraction(params) {
 }
 
 /**
- * Get the next available nonce for a maker from the OptionsNFT contract
+ * Get the next available nonce for a maker from OptionsNFT
  * @param {string} makerAddress - Maker address
  * @param {string} optionsNFTAddress - OptionsNFT contract address
  * @returns {Promise<number>} Next available nonce
  */
-async function getNextNonce(makerAddress, optionsNFTAddress) {
+async function getNextNonceFromOptionsNFT(makerAddress, optionsNFTAddress) {
   const optionsNFT = await ethers.getContractAt("OptionNFT", optionsNFTAddress);
   const nonce = await optionsNFT.getNextNonce(makerAddress);
   return Number(nonce);
+}
+
+/**
+ * Check if nonce is available for a maker in OptionsNFT
+ * @param {string} makerAddress - Maker address
+ * @param {string} optionsNFTAddress - OptionsNFT contract address
+ * @param {number} nonce - Nonce to check
+ * @returns {Promise<boolean>} True if nonce is available
+ */
+async function isNonceAvailableInOptionsNFT(makerAddress, optionsNFTAddress, nonce) {
+  const optionsNFT = await ethers.getContractAt("OptionNFT", optionsNFTAddress);
+  const isAvailable = await optionsNFT.isNonceAvailable(makerAddress, nonce);
+  return isAvailable;
+}
+
+/**
+ * Advance nonce for a maker in OptionsNFT (for testing/debugging)
+ * @param {Object} signer - Signer object
+ * @param {string} optionsNFTAddress - OptionsNFT contract address
+ * @param {number} amount - Amount to advance (default: 1)
+ * @returns {Promise<Object>} Transaction result
+ */
+async function advanceNonceInOptionsNFT(signer, optionsNFTAddress, amount = 1) {
+  const optionsNFT = await ethers.getContractAt("OptionNFT", optionsNFTAddress);
+  const tx = await optionsNFT.connect(signer).advanceNonce(signer.address, amount);
+  return tx;
 }
 
 // LOP nonce tracking per maker
@@ -385,47 +411,6 @@ function getNextLopNonce(makerAddress) {
  */
 function resetLopNonce(makerAddress, nonce = 0) {
   lopNonceTracker.set(makerAddress, nonce);
-}
-
-/**
- * Get the next available LOP nonce from SeriesNonceManager
- * @param {string} makerAddress - Maker address
- * @param {string} seriesNonceManagerAddress - SeriesNonceManager contract address
- * @param {number} series - Series number (default: 0)
- * @returns {Promise<number>} Next available LOP nonce
- */
-async function getNextLopNonceFromSeries(makerAddress, seriesNonceManagerAddress, series = 0) {
-  const seriesNonceManager = await ethers.getContractAt("SeriesNonceManager", seriesNonceManagerAddress);
-  const currentNonce = await seriesNonceManager.nonce(series, makerAddress);
-  return Number(currentNonce);
-}
-
-/**
- * Advance LOP nonce in SeriesNonceManager
- * @param {Object} signer - Signer object
- * @param {string} seriesNonceManagerAddress - SeriesNonceManager contract address
- * @param {number} series - Series number (default: 0)
- * @param {number} amount - Amount to advance (default: 1)
- * @returns {Promise<Object>} Transaction result
- */
-async function advanceLopNonce(signer, seriesNonceManagerAddress, series = 0, amount = 1) {
-  const seriesNonceManager = await ethers.getContractAt("SeriesNonceManager", seriesNonceManagerAddress);
-  const tx = await seriesNonceManager.connect(signer).advanceNonce(series, amount);
-  return tx;
-}
-
-/**
- * Check if LOP nonce equals expected value in SeriesNonceManager
- * @param {string} makerAddress - Maker address
- * @param {string} seriesNonceManagerAddress - SeriesNonceManager contract address
- * @param {number} series - Series number (default: 0)
- * @param {number} expectedNonce - Expected nonce value
- * @returns {Promise<boolean>} True if nonce equals expected value
- */
-async function checkLopNonceEquals(makerAddress, seriesNonceManagerAddress, series = 0, expectedNonce) {
-  const seriesNonceManager = await ethers.getContractAt("SeriesNonceManager", seriesNonceManagerAddress);
-  const equals = await seriesNonceManager.nonceEquals(series, makerAddress, expectedNonce);
-  return equals;
 }
 
 /**
@@ -464,7 +449,7 @@ async function buildCompleteCallOption(params) {
   // Auto-fetch nonce if not provided
   let finalNonce = nonce;
   if (finalNonce === undefined) {
-    finalNonce = await getNextNonce(makerSigner.address, optionsNFTAddress);
+    finalNonce = await getNextNonceFromOptionsNFT(makerSigner.address, optionsNFTAddress);
     console.log(`🔢 Auto-fetched nonce: ${finalNonce} for maker ${makerSigner.address}`);
   }
 
@@ -609,10 +594,9 @@ module.exports = {
   deployDummyOptionToken,
   setupDummyTokensForMaker,
   cleanupDummyTokens,
-  getNextNonce,
+  getNextNonceFromOptionsNFT,
+  isNonceAvailableInOptionsNFT,
+  advanceNonceInOptionsNFT,
   getNextLopNonce,
-  resetLopNonce,
-  getNextLopNonceFromSeries,
-  advanceLopNonce,
-  checkLopNonceEquals
+  resetLopNonce
 }; 

@@ -12,12 +12,6 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "../external/limit-order-protocol/contracts/interfaces/ITakerInteraction.sol";
 import "../external/limit-order-protocol/contracts/interfaces/IOrderMixin.sol";
 
-// Interface for SeriesNonceManager
-interface ISeriesNonceManager {
-    function nonce(uint256 series, address maker) external view returns (uint256);
-    function advanceNonce(uint256 series, uint256 amount) external;
-}
-
 contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, ReentrancyGuard {
     using ECDSA for bytes32;
 
@@ -37,14 +31,16 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
 
     uint256 public nextOptionId;
     mapping(uint256 => Option) public options;
-    mapping(address => mapping(uint256 => bool)) public usedNonces; // maker => nonce => used
+    
+    // INDEPENDENT nonce management for OptionsNFT
+    mapping(address => uint256) public optionNonces; // maker => current nonce
+    mapping(address => mapping(uint256 => bool)) public usedOptionNonces; // maker => nonce => used
     
     // Collateral tracking
     mapping(uint256 => bool) public collateralProvided; // optionId => collateral status
     mapping(uint256 => uint256) public collateralTimestamp; // optionId => when collateral was provided
     
     address public limitOrderProtocol;
-    address public seriesNonceManager; // Add SeriesNonceManager integration
     
     // Default option parameters for compact mode
     address public defaultUnderlyingAsset;
@@ -58,6 +54,7 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
     event DebugInfo(string message, bytes data);
     event CollateralProvided(uint256 indexed optionId, address indexed maker, uint256 amount, uint256 timestamp);
     event CollateralReturned(uint256 indexed optionId, address indexed to, uint256 amount, uint256 timestamp);
+    event OptionNonceUsed(address indexed maker, uint256 nonce);
 
     constructor(address _limitOrderProtocol) 
         ERC721("OnChainCallOption", "OCCO") 
@@ -74,10 +71,6 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
 
     function setLimitOrderProtocol(address _limitOrderProtocol) external onlyOwner {
         limitOrderProtocol = _limitOrderProtocol;
-    }
-
-    function setSeriesNonceManager(address _seriesNonceManager) external onlyOwner {
-        seriesNonceManager = _seriesNonceManager;
     }
 
     function setDefaultOptionParams(
@@ -135,7 +128,10 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         require(strikeAsset != address(0), "Invalid strike asset");
         require(strikePrice > 0, "Invalid strike price");
         require(amount > 0, "Invalid amount");
-        require(!usedNonces[maker][nonce], "Nonce already used");
+        
+        // INDEPENDENT nonce validation for OptionsNFT
+        require(!usedOptionNonces[maker][nonce], "Option nonce already used");
+        require(nonce >= optionNonces[maker], "Nonce too low");
 
         // FIXED: Verify signature using actual parameters from signature
         bytes32 structHash = keccak256(
@@ -160,8 +156,10 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         emit DebugInfo("recovered address", abi.encode(recovered));
         require(maker == recovered, "Invalid signature");
 
-        // Mark nonce as used
-        usedNonces[maker][nonce] = true;
+        // Mark nonce as used and update current nonce
+        usedOptionNonces[maker][nonce] = true;
+        optionNonces[maker] = nonce + 1; // Next nonce should be higher
+        emit OptionNonceUsed(maker, nonce);
 
         // Pull collateral from maker using actual amount from signature
         require(IERC20(underlyingAsset).transferFrom(maker, address(this), amount), "Transfer failed");
@@ -329,30 +327,11 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         IERC20(token).transfer(owner(), amount);
     }
 
-    /// @notice Get the next available nonce for a maker (optimized)
+    /// @notice Get the next available nonce for a maker
     /// @param maker The maker address
     /// @return The next available nonce
     function getNextNonce(address maker) external view returns (uint256) {
-        // If SeriesNonceManager is set, use it for series 0
-        if (seriesNonceManager != address(0)) {
-            try this.getNextNonceFromSeries(maker, 0) returns (uint256 nonce) {
-                return nonce;
-            } catch {
-                // Fallback to internal tracking
-            }
-        }
-        
-        // Optimized fallback to internal nonce tracking
-        // Start from 0 and find the first unused nonce
-        uint256 nonce = 0;
-        while (usedNonces[maker][nonce]) {
-            nonce++;
-            // Prevent infinite loops (though practically impossible)
-            if (nonce > 1000000) {
-                revert("Nonce overflow");
-            }
-        }
-        return nonce;
+        return optionNonces[maker];
     }
 
     /// @notice Get the next available nonce for a maker (gas optimized)
@@ -361,7 +340,7 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
     /// @return The next available nonce
     function getNextNonceFrom(address maker, uint256 startNonce) external view returns (uint256) {
         uint256 nonce = startNonce;
-        while (usedNonces[maker][nonce]) {
+        while (usedOptionNonces[maker][nonce]) {
             nonce++;
             // Prevent infinite loops
             if (nonce > startNonce + 1000) {
@@ -371,26 +350,11 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         return nonce;
     }
 
-    /// @notice Get the next available nonce for a maker from SeriesNonceManager
-    /// @param maker The maker address
-    /// @param series The series number
-    /// @return The next available nonce
-    function getNextNonceFromSeries(address maker, uint256 series) external view returns (uint256) {
-        require(seriesNonceManager != address(0), "SeriesNonceManager not set");
-        
-        ISeriesNonceManager nonceManager = ISeriesNonceManager(seriesNonceManager);
-        return nonceManager.nonce(series, maker);
-    }
-
     /// @notice Get the current nonce for a maker (last used + 1)
     /// @param maker The maker address
     /// @return The current nonce
     function getCurrentNonce(address maker) external view returns (uint256) {
-        uint256 nonce = 0;
-        while (usedNonces[maker][nonce]) {
-            nonce++;
-        }
-        return nonce;
+        return optionNonces[maker];
     }
 
     /// @notice Check if a nonce is available for a maker
@@ -398,7 +362,15 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
     /// @param nonce The nonce to check
     /// @return True if the nonce is available
     function isNonceAvailable(address maker, uint256 nonce) external view returns (bool) {
-        return !usedNonces[maker][nonce];
+        return !usedOptionNonces[maker][nonce] && nonce >= optionNonces[maker];
+    }
+
+    /// @notice Advance nonce for a maker (for testing/debugging)
+    /// @param maker The maker address
+    /// @param amount The amount to advance by
+    function advanceNonce(address maker, uint256 amount) external {
+        require(msg.sender == maker || msg.sender == owner(), "Not authorized");
+        optionNonces[maker] += amount;
     }
 
     // Alternative approach: Track used order hashes instead of nonces

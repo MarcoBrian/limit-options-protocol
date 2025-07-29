@@ -4,9 +4,8 @@ const { ethers } = require("hardhat");
  * Comprehensive nonce management for OptionsNFT
  */
 class NonceManager {
-  constructor(optionsNFTAddress, seriesNonceManagerAddress = null) {
+  constructor(optionsNFTAddress) {
     this.optionsNFTAddress = optionsNFTAddress;
-    this.seriesNonceManagerAddress = seriesNonceManagerAddress;
   }
 
   /**
@@ -21,22 +20,6 @@ class NonceManager {
   }
 
   /**
-   * Get nonce from SeriesNonceManager if available
-   * @param {string} makerAddress - Maker address
-   * @param {number} series - Series number (default: 0)
-   * @returns {Promise<number>} Nonce from SeriesNonceManager
-   */
-  async getSeriesNonce(makerAddress, series = 0) {
-    if (!this.seriesNonceManagerAddress) {
-      throw new Error("SeriesNonceManager not configured");
-    }
-
-    const seriesNonceManager = await ethers.getContractAt("SeriesNonceManager", this.seriesNonceManagerAddress);
-    const nonce = await seriesNonceManager.nonce(series, makerAddress);
-    return Number(nonce);
-  }
-
-  /**
    * Check if a nonce is available for a maker
    * @param {string} makerAddress - Maker address
    * @param {number} nonce - Nonce to check
@@ -44,11 +27,12 @@ class NonceManager {
    */
   async isNonceAvailable(makerAddress, nonce) {
     const optionsNFT = await ethers.getContractAt("OptionNFT", this.optionsNFTAddress);
-    return await optionsNFT.isNonceAvailable(makerAddress, nonce);
+    const isAvailable = await optionsNFT.isNonceAvailable(makerAddress, nonce);
+    return isAvailable;
   }
 
   /**
-   * Get current nonce for a maker
+   * Get the current nonce for a maker
    * @param {string} makerAddress - Maker address
    * @returns {Promise<number>} Current nonce
    */
@@ -59,20 +43,39 @@ class NonceManager {
   }
 
   /**
-   * Advance nonce in SeriesNonceManager
+   * Advance nonce for a maker (for testing/debugging)
    * @param {Object} signer - Signer object
-   * @param {number} series - Series number (default: 0)
    * @param {number} amount - Amount to advance (default: 1)
    * @returns {Promise<Object>} Transaction result
    */
-  async advanceNonce(signer, series = 0, amount = 1) {
-    if (!this.seriesNonceManagerAddress) {
-      throw new Error("SeriesNonceManager not configured");
-    }
-
-    const seriesNonceManager = await ethers.getContractAt("SeriesNonceManager", this.seriesNonceManagerAddress);
-    const tx = await seriesNonceManager.connect(signer).advanceNonce(series, amount);
+  async advanceNonce(signer, amount = 1) {
+    const optionsNFT = await ethers.getContractAt("OptionNFT", this.optionsNFTAddress);
+    const tx = await optionsNFT.connect(signer).advanceNonce(signer.address, amount);
     return await tx.wait();
+  }
+
+  /**
+   * Validate nonce before using it
+   * @param {string} makerAddress - Maker address
+   * @param {number} nonce - Nonce to validate
+   * @returns {Promise<boolean>} True if nonce is valid
+   */
+  async validateNonce(makerAddress, nonce) {
+    const isAvailable = await this.isNonceAvailable(makerAddress, nonce);
+    if (!isAvailable) {
+      console.warn(`⚠️ Nonce ${nonce} is not available for maker ${makerAddress}`);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Get recommended nonce for a maker
+   * @param {string} makerAddress - Maker address
+   * @returns {Promise<number>} Recommended nonce
+   */
+  async getRecommendedNonce(makerAddress) {
+    return await this.getNextNonce(makerAddress);
   }
 
   /**
@@ -95,61 +98,73 @@ class NonceManager {
       optionsNFTAddress: this.optionsNFTAddress
     };
 
-    // Add SeriesNonceManager info if available
-    if (this.seriesNonceManagerAddress) {
-      try {
-        const seriesNonce = await this.getSeriesNonce(makerAddress, 0);
-        info.seriesNonce = seriesNonce;
-        info.seriesNonceManagerAddress = this.seriesNonceManagerAddress;
-      } catch (error) {
-        info.seriesNonceError = error.message;
-      }
-    }
-
     return info;
   }
 
   /**
-   * Validate nonce before using it
+   * Get nonce usage statistics for a maker
    * @param {string} makerAddress - Maker address
-   * @param {number} nonce - Nonce to validate
-   * @returns {Promise<boolean>} True if nonce is valid
+   * @param {number} maxCheck - Maximum nonces to check (default: 100)
+   * @returns {Promise<Object>} Nonce usage statistics
    */
-  async validateNonce(makerAddress, nonce) {
-    const isAvailable = await this.isNonceAvailable(makerAddress, nonce);
-    if (!isAvailable) {
-      console.warn(`⚠️ Nonce ${nonce} is not available for maker ${makerAddress}`);
-      return false;
+  async getNonceStats(makerAddress, maxCheck = 100) {
+    const currentNonce = await this.getCurrentNonce(makerAddress);
+    let usedCount = 0;
+    let availableCount = 0;
+    let lastUsedNonce = 0;
+
+    // Check nonces up to current nonce + maxCheck
+    for (let i = 0; i < Math.min(currentNonce + maxCheck, currentNonce + 100); i++) {
+      const isAvailable = await this.isNonceAvailable(makerAddress, i);
+      if (!isAvailable) {
+        usedCount++;
+        lastUsedNonce = i;
+      } else {
+        availableCount++;
+      }
     }
-    return true;
+
+    return {
+      maker: makerAddress,
+      currentNonce,
+      usedCount,
+      availableCount,
+      lastUsedNonce,
+      nextAvailableNonce: currentNonce
+    };
   }
 
   /**
-   * Get recommended nonce for a maker (with validation)
-   * @param {string} makerAddress - Maker address
-   * @returns {Promise<number>} Recommended nonce
+   * Reset nonce for a maker (for testing only)
+   * @param {Object} signer - Signer object
+   * @param {number} targetNonce - Target nonce to reset to
+   * @returns {Promise<Object>} Transaction result
    */
-  async getRecommendedNonce(makerAddress) {
-    const nonce = await this.getNextNonce(makerAddress);
-    const isValid = await this.validateNonce(makerAddress, nonce);
+  async resetNonce(signer, targetNonce = 0) {
+    const currentNonce = await this.getCurrentNonce(signer.address);
+    const difference = currentNonce - targetNonce;
     
-    if (!isValid) {
-      throw new Error(`Invalid nonce ${nonce} for maker ${makerAddress}`);
+    if (difference > 0) {
+      // We can't decrease nonce, so we need to advance by a large amount
+      // This is a workaround for testing - in production, nonces should only increase
+      console.warn(`⚠️ Cannot decrease nonce from ${currentNonce} to ${targetNonce}`);
+      return null;
+    } else if (difference < 0) {
+      // Advance nonce to target
+      return await this.advanceNonce(signer, Math.abs(difference));
     }
     
-    console.log(`✅ Recommended nonce ${nonce} for maker ${makerAddress}`);
-    return nonce;
+    return null;
   }
 }
 
 /**
- * Create a NonceManager instance
+ * Create a new NonceManager instance
  * @param {string} optionsNFTAddress - OptionsNFT contract address
- * @param {string} seriesNonceManagerAddress - SeriesNonceManager address (optional)
  * @returns {NonceManager} NonceManager instance
  */
-function createNonceManager(optionsNFTAddress, seriesNonceManagerAddress = null) {
-  return new NonceManager(optionsNFTAddress, seriesNonceManagerAddress);
+function createNonceManager(optionsNFTAddress) {
+  return new NonceManager(optionsNFTAddress);
 }
 
 module.exports = {

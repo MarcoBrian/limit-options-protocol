@@ -4,8 +4,29 @@ const { ethers } = require("hardhat");
  * Comprehensive nonce management for OptionsNFT
  */
 class NonceManager {
-  constructor(optionsNFTAddress) {
+  constructor(optionsNFTAddress, provider = null) {
     this.optionsNFTAddress = optionsNFTAddress;
+    this.provider = provider;
+  }
+
+  /**
+   * Get the contract instance with the correct provider
+   */
+  async getContract() {
+    if (this.provider) {
+      // Use provided provider (for tests)
+      return new ethers.Contract(this.optionsNFTAddress, [
+        'function getNextNonce(address maker) view returns (uint256)',
+        'function getCurrentNonce(address maker) view returns (uint256)',
+        'function isNonceAvailable(address maker, uint256 nonce) view returns (bool)',
+        'function advanceNonce(address maker, uint256 amount)',
+        'function nextOptionId() view returns (uint256)',
+        'function limitOrderProtocol() view returns (address)'
+      ], this.provider);
+    } else {
+      // Use Hardhat's provider (for scripts)
+      return await ethers.getContractAt("OptionNFT", this.optionsNFTAddress);
+    }
   }
 
   /**
@@ -14,7 +35,7 @@ class NonceManager {
    * @returns {Promise<number>} Next available nonce
    */
   async getNextNonce(makerAddress) {
-    const optionsNFT = await ethers.getContractAt("OptionNFT", this.optionsNFTAddress);
+    const optionsNFT = await this.getContract();
     const nonce = await optionsNFT.getNextNonce(makerAddress);
     return Number(nonce);
   }
@@ -26,7 +47,7 @@ class NonceManager {
    * @returns {Promise<boolean>} True if nonce is available
    */
   async isNonceAvailable(makerAddress, nonce) {
-    const optionsNFT = await ethers.getContractAt("OptionNFT", this.optionsNFTAddress);
+    const optionsNFT = await this.getContract();
     const isAvailable = await optionsNFT.isNonceAvailable(makerAddress, nonce);
     return isAvailable;
   }
@@ -37,7 +58,7 @@ class NonceManager {
    * @returns {Promise<number>} Current nonce
    */
   async getCurrentNonce(makerAddress) {
-    const optionsNFT = await ethers.getContractAt("OptionNFT", this.optionsNFTAddress);
+    const optionsNFT = await this.getContract();
     const nonce = await optionsNFT.getCurrentNonce(makerAddress);
     return Number(nonce);
   }
@@ -49,7 +70,7 @@ class NonceManager {
    * @returns {Promise<Object>} Transaction result
    */
   async advanceNonce(signer, amount = 1) {
-    const optionsNFT = await ethers.getContractAt("OptionNFT", this.optionsNFTAddress);
+    const optionsNFT = await this.getContract();
     const tx = await optionsNFT.connect(signer).advanceNonce(signer.address, amount);
     return await tx.wait();
   }
@@ -84,7 +105,7 @@ class NonceManager {
    * @returns {Promise<Object>} Nonce information
    */
   async getNonceInfo(makerAddress) {
-    const optionsNFT = await ethers.getContractAt("OptionNFT", this.optionsNFTAddress);
+    const optionsNFT = await this.getContract();
     
     const nextNonce = await this.getNextNonce(makerAddress);
     const currentNonce = await this.getCurrentNonce(makerAddress);
@@ -102,69 +123,64 @@ class NonceManager {
   }
 
   /**
-   * Get nonce usage statistics for a maker
+   * Get nonce statistics for a maker
    * @param {string} makerAddress - Maker address
-   * @param {number} maxCheck - Maximum nonces to check (default: 100)
-   * @returns {Promise<Object>} Nonce usage statistics
+   * @param {number} maxCheck - Maximum nonces to check
+   * @returns {Promise<Object>} Nonce statistics
    */
   async getNonceStats(makerAddress, maxCheck = 100) {
-    const currentNonce = await this.getCurrentNonce(makerAddress);
-    let usedCount = 0;
-    let availableCount = 0;
-    let lastUsedNonce = 0;
+    const stats = {
+      maker: makerAddress,
+      totalChecked: 0,
+      availableNonces: [],
+      usedNonces: [],
+      nextAvailable: null
+    };
 
-    // Check nonces up to current nonce + maxCheck
-    for (let i = 0; i < Math.min(currentNonce + maxCheck, currentNonce + 100); i++) {
+    for (let i = 0; i < maxCheck; i++) {
       const isAvailable = await this.isNonceAvailable(makerAddress, i);
-      if (!isAvailable) {
-        usedCount++;
-        lastUsedNonce = i;
+      stats.totalChecked++;
+      
+      if (isAvailable) {
+        stats.availableNonces.push(i);
+        if (stats.nextAvailable === null) {
+          stats.nextAvailable = i;
+        }
       } else {
-        availableCount++;
+        stats.usedNonces.push(i);
       }
     }
 
-    return {
-      maker: makerAddress,
-      currentNonce,
-      usedCount,
-      availableCount,
-      lastUsedNonce,
-      nextAvailableNonce: currentNonce
-    };
+    return stats;
   }
 
   /**
-   * Reset nonce for a maker (for testing only)
+   * Reset nonce for a maker (for testing)
    * @param {Object} signer - Signer object
    * @param {number} targetNonce - Target nonce to reset to
    * @returns {Promise<Object>} Transaction result
    */
   async resetNonce(signer, targetNonce = 0) {
     const currentNonce = await this.getCurrentNonce(signer.address);
-    const difference = currentNonce - targetNonce;
+    const advanceAmount = targetNonce - currentNonce;
     
-    if (difference > 0) {
-      // We can't decrease nonce, so we need to advance by a large amount
-      // This is a workaround for testing - in production, nonces should only increase
-      console.warn(`⚠️ Cannot decrease nonce from ${currentNonce} to ${targetNonce}`);
+    if (advanceAmount > 0) {
+      return await this.advanceNonce(signer, advanceAmount);
+    } else {
+      console.log(`Current nonce ${currentNonce} is already >= target ${targetNonce}`);
       return null;
-    } else if (difference < 0) {
-      // Advance nonce to target
-      return await this.advanceNonce(signer, Math.abs(difference));
     }
-    
-    return null;
   }
 }
 
 /**
- * Create a new NonceManager instance
+ * Create a nonce manager instance
  * @param {string} optionsNFTAddress - OptionsNFT contract address
- * @returns {NonceManager} NonceManager instance
+ * @param {Object} provider - Optional provider (for tests)
+ * @returns {NonceManager} Nonce manager instance
  */
-function createNonceManager(optionsNFTAddress) {
-  return new NonceManager(optionsNFTAddress);
+function createNonceManager(optionsNFTAddress, provider = null) {
+  return new NonceManager(optionsNFTAddress, provider);
 }
 
 module.exports = {

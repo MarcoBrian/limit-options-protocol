@@ -1,0 +1,26 @@
+{
+  "name": "limit-options-protocol",
+  "version": "1.0.0",
+  "description": "Building on top of 1inch limit order protocol to extend capabilities and allow for DeFi marketplace of Options contract",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:lop": "npx hardhat run scripts/test-limit-order-protocol.js --network localhost",
+    "test:options": "npx hardhat run scripts/test-options.js --network localhost"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "hardhat": "^2.26.1",
+    "hardhat-preprocessor": "^0.1.5"
+  },
+  "dependencies": {
+    "@1inch/limit-order-protocol-utils": "^4.0.1",
+    "@1inch/limit-order-sdk": "^4.9.5-rc.0",
+    "@1inch/solidity-utils": "^6.6.0",
+    "@1inch/token-plugins": "^1.3.0",
+    "@openzeppelin/contracts": "^5.4.0"
+  }
+}

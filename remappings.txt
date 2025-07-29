@@ -1,0 +1,2 @@
+@1inch/solidity-utils/=node_modules/@1inch/solidity-utils/
+@1inch/token-plugins/=node_modules/@1inch/token-plugins/

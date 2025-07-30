@@ -79,6 +79,7 @@ export interface WalletContextType {
   account: string | null;
   isConnected: boolean;
   isConnecting: boolean;
+  chainId: number | null;
   connect: () => Promise<void>;
   disconnect: () => void;
   signMessage: (message: string) => Promise<string>;

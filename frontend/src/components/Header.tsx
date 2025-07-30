@@ -2,10 +2,17 @@ import React from 'react';
 import { useWallet } from '../contexts/WalletContext';
 
 const Header: React.FC = () => {
-  const { account, isConnected, isConnecting, connect, disconnect } = useWallet();
+  const { account, isConnected, isConnecting, chainId, connect, disconnect } = useWallet();
 
   const formatAddress = (address: string) => {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  };
+
+  const getNetworkName = (chainId: number | null) => {
+    if (chainId === 31337) return 'Hardhat Local';
+    if (chainId === 1) return 'Ethereum Mainnet';
+    if (chainId === 11155111) return 'Sepolia Testnet';
+    return `Chain ${chainId}`;
   };
 
   const handleConnect = async () => {
@@ -14,6 +21,14 @@ const Header: React.FC = () => {
     } catch (err) {
       // Error is already handled in the context with toasts
       console.error('Connection failed:', err);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    try {
+      await disconnect();
+    } catch (err) {
+      console.error('Disconnect failed:', err);
     }
   };
 
@@ -36,11 +51,18 @@ const Header: React.FC = () => {
           <div className="flex items-center">
             {isConnected ? (
               <div className="flex items-center space-x-3">
-                <span className="text-sm text-text-secondary">
-                  {formatAddress(account!)}
-                </span>
+                <div className="text-right">
+                  <div className="text-sm text-text-secondary">
+                    {formatAddress(account!)}
+                  </div>
+                  {chainId && (
+                    <div className="text-xs text-text-secondary">
+                      {getNetworkName(chainId)}
+                    </div>
+                  )}
+                </div>
                 <button
-                  onClick={disconnect}
+                  onClick={handleDisconnect}
                   className="btn-secondary text-sm"
                 >
                   Disconnect

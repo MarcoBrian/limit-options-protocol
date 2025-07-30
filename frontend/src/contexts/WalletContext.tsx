@@ -14,9 +14,16 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
   const [provider, setProvider] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [chainId, setChainId] = useState<number | null>(null);
+  const [manuallyDisconnected, setManuallyDisconnected] = useState(false);
   const { showToast } = useToast();
 
   useEffect(() => {
+    // Don't auto-connect if user manually disconnected
+    if (manuallyDisconnected) {
+      return;
+    }
+
     // Check if MetaMask is installed
     if (typeof window.ethereum !== 'undefined') {
       const ethereum = window.ethereum;
@@ -36,6 +43,13 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
           showToast('Failed to check existing connection', 'error');
         });
 
+      // Get current chain ID
+      ethereum.request({ method: 'eth_chainId' })
+        .then((chainId: string) => {
+          setChainId(parseInt(chainId, 16));
+        })
+        .catch(console.error);
+
       // Listen for account changes
       ethereum.on('accountsChanged', (accounts: string[]) => {
         if (accounts.length > 0) {
@@ -48,14 +62,14 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       });
 
       // Listen for chain changes
-      ethereum.on('chainChanged', () => {
-        // Optionally handle chain changes
-        console.log('Network changed');
+      ethereum.on('chainChanged', (chainId: string) => {
+        setChainId(parseInt(chainId, 16));
+        console.log('Network changed to:', parseInt(chainId, 16));
       });
     } else {
       showToast('MetaMask is not installed', 'error');
     }
-  }, [showToast]);
+  }, [showToast, manuallyDisconnected]);
 
   const connect = async () => {
     try {
@@ -71,6 +85,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       if (accounts.length > 0) {
         setAccount(accounts[0]);
         setIsConnected(true);
+        setManuallyDisconnected(false); // Reset manually disconnected state
         const provider = new ethers.BrowserProvider(ethereum);
         setProvider(provider);
         showToast('Wallet connected successfully!', 'success');
@@ -104,11 +119,28 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
     }
   };
 
-  const disconnect = () => {
-    setAccount(null);
-    setIsConnected(false);
-    setProvider(null);
-    showToast('Wallet disconnected', 'info');
+  const disconnect = async () => {
+    try {
+      // Try to revoke MetaMask permissions
+      if (typeof window.ethereum !== 'undefined') {
+        // Request to revoke account permissions
+        await window.ethereum.request({
+          method: 'wallet_requestPermissions',
+          params: []
+        });
+      }
+    } catch (error) {
+      console.log('MetaMask permission revocation failed:', error);
+      // This is expected - MetaMask doesn't always support this
+    } finally {
+      // Always clear local state
+      setAccount(null);
+      setIsConnected(false);
+      setProvider(null);
+      setChainId(null);
+      setManuallyDisconnected(true); // Set manuallyDisconnected to true after disconnect
+      showToast('Wallet disconnected', 'info');
+    }
   };
 
   const signMessage = async (message: string): Promise<string> => {
@@ -139,6 +171,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
     account,
     isConnected,
     isConnecting,
+    chainId,
     connect,
     disconnect,
     signMessage,

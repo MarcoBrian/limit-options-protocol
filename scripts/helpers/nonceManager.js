@@ -37,70 +37,60 @@ class OrderHashManager {
 }
 
 /**
- * Simple Nonce Manager - Based on the user's example pattern
- * Reusable helper for managing LOP nonces with sequential approach
+ * Simple Random Nonce Manager - 1inch Pattern
+ * Uses random nonces with negligible collision probability
  */
-class SimpleNonceManager {
+class RandomNonceManager {
   constructor() {
-    this.localNonces = new Map(); // maker -> next nonce
+    // No persistent storage needed for random nonces
   }
   
   /**
-   * Get current nonce from LOP contract (simplified approach)
-   * @param {string} maker - Maker address
-   * @param {Object} lopContract - LOP contract instance
-   * @returns {Promise<bigint>} Current nonce
+   * Generate random nonce following 1inch pattern
+   * @returns {bigint} Random nonce between 0 and UINT_40_MAX
    */
-  async getCurrentNonce(maker, lopContract) {
-    console.log(`🔍 Getting current nonce for ${maker} from LOP...`);
+  generateRandomNonce() {
+    const UINT_40_MAX = 1099511627775n; // 2^40 - 1
     
-    try {
-      // Try to get nonce from contract (if available)
-      const nonce = await lopContract.nonces(maker);
-      console.log(`   ✅ Current nonce from contract: ${nonce}`);
-      return BigInt(nonce.toString());
-    } catch (error) {
-      console.log(`   ⚠️ Contract nonce method not available, using local counter`);
-      // Fallback to local counter if contract method doesn't exist
-      if (!this.localNonces.has(maker)) {
-        this.localNonces.set(maker, 0n);
-      }
-      return this.localNonces.get(maker);
-    }
+    // Generate random BigInt using crypto.randomBytes
+    const crypto = require('crypto');
+    const randomBytes = crypto.randomBytes(5); // 40 bits = 5 bytes
+    
+    // Convert to hex string and then to BigInt
+    const hexString = '0x' + randomBytes.toString('hex');
+    const randomBigInt = ethers.getBigInt(hexString);
+    
+    // Ensure it's within UINT_40_MAX range
+    const nonce = randomBigInt % (UINT_40_MAX + 1n);
+    
+    console.log(`   🎲 Generated random nonce: ${nonce} (max: ${UINT_40_MAX})`);
+    return nonce;
   }
   
   /**
-   * Get next nonce for a maker (simple sequential approach)
+   * Get random nonce (1inch pattern)
+   * @param {string} maker - Maker address (unused, kept for compatibility)
+   * @param {Object} lopContract - LOP contract instance (unused, kept for compatibility)
+   * @returns {Promise<bigint>} Random nonce
+   */
+  async getRandomNonce(maker, lopContract) {
+    console.log(`🎲 Getting random nonce for ${maker} (1inch pattern)...`);
+    
+    // Simply generate a random nonce - no tracking needed
+    const randomNonce = this.generateRandomNonce();
+    
+    console.log(`   ✅ Using random nonce: ${randomNonce}`);
+    return randomNonce;
+  }
+  
+  /**
+   * Get next nonce (alias for random nonce for compatibility)
    * @param {string} maker - Maker address
    * @param {Object} lopContract - LOP contract instance
-   * @returns {Promise<bigint>} Next nonce
+   * @returns {Promise<bigint>} Random nonce
    */
   async getNextNonce(maker, lopContract) {
-    // Get current nonce
-    const currentNonce = await this.getCurrentNonce(maker, lopContract);
-    
-    // Use local counter if we have one, otherwise use current + 1
-    if (this.localNonces.has(maker)) {
-      const localNonce = this.localNonces.get(maker);
-      this.localNonces.set(maker, localNonce + 1n);
-      console.log(`   📦 Using local nonce: ${localNonce}`);
-      return localNonce;
-    } else {
-      // Start from current + 1
-      const nextNonce = currentNonce + 1n;
-      this.localNonces.set(maker, nextNonce + 1n);
-      console.log(`   🔗 Using sequential nonce: ${nextNonce}`);
-      return nextNonce;
-    }
-  }
-  
-  /**
-   * Reset local nonce for a maker (useful for testing)
-   * @param {string} maker - Maker address
-   */
-  resetNonce(maker) {
-    this.localNonces.delete(maker);
-    console.log(`   🔄 Reset nonce for ${maker}`);
+    return await this.getRandomNonce(maker, lopContract);
   }
 }
 
@@ -205,17 +195,37 @@ function createOrderHashManager(contractAddress, provider) {
 }
 
 /**
- * Create SimpleNonceManager instance
- * @returns {SimpleNonceManager} SimpleNonceManager instance
+ * Create RandomNonceManager instance
+ * @returns {RandomNonceManager} RandomNonceManager instance
+ */
+function createRandomNonceManager() {
+  return new RandomNonceManager();
+}
+
+/**
+ * Create PersistentNonceManager instance (deprecated, use RandomNonceManager)
+ * @returns {RandomNonceManager} RandomNonceManager instance
+ */
+function createPersistentNonceManager() {
+  console.log('⚠️  createPersistentNonceManager is deprecated, using RandomNonceManager');
+  return new RandomNonceManager();
+}
+
+/**
+ * Create SimpleNonceManager instance (deprecated, use RandomNonceManager)
+ * @returns {RandomNonceManager} RandomNonceManager instance
  */
 function createSimpleNonceManager() {
-  return new SimpleNonceManager();
+  console.log('⚠️  createSimpleNonceManager is deprecated, using RandomNonceManager');
+  return new RandomNonceManager();
 }
 
 module.exports = {
   OrderHashManager,
-  SimpleNonceManager,
+  RandomNonceManager,
   createOrderHashManager,
+  createRandomNonceManager,
+  createPersistentNonceManager,
   createSimpleNonceManager,
   createMakerTraitsSimple,
   quickSalt

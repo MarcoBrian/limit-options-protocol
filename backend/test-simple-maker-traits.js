@@ -2,7 +2,8 @@ const { ethers } = require('hardhat');
 const axios = require('axios');
 require('dotenv').config();
 
-const BACKEND_URL = 'http://localhost:3000';
+// Import the new envLoader utility
+const { loadContractAddresses } = require('../scripts/utils/envLoader');
 
 // Import builder helper functions
 const {
@@ -15,8 +16,9 @@ const {
 // Import nonce manager helpers
 const { 
   createOrderHashManager, 
-  createSimpleNonceManager,
-  createMakerTraitsSimple
+  createPersistentNonceManager,
+  createMakerTraitsSimple,
+  createRandomNonceManager
 } = require('../scripts/helpers/nonceManager');
 
 /**
@@ -31,36 +33,22 @@ async function createOptionsOrderSimple() {
     console.log('   Maker address:', maker.address);
     console.log('   Taker address:', taker.address);
 
-    // Deploy contracts first
-    console.log('\n📦 Deploying contracts for testing...');
+    // Use existing deployed contracts from environment using the new utility
+    console.log('\n📦 Loading existing deployed contracts from environment...');
     
-    // Deploy mock tokens
-    const MockERC20 = await ethers.getContractFactory("MockERC20", maker);
-    const mockETH = await MockERC20.deploy("Mock ETH", "mETH");
-    const mockUSDC = await MockERC20.deploy("Mock USDC", "mUSDC");
-    await mockETH.waitForDeployment();
-    await mockUSDC.waitForDeployment();
+    const addresses = loadContractAddresses({ required: true });
+    
+    console.log('✅ Using existing contracts:');
+    console.log(`   MockETH: ${addresses.mockETHAddress}`);
+    console.log(`   MockUSDC: ${addresses.mockUSDCAddress}`);
+    console.log(`   LOP: ${addresses.lopAddress}`);
+    console.log(`   OptionsNFT: ${addresses.optionsNFTAddress}`);
 
-    // Deploy WETH
-    const MockWETH = await ethers.getContractFactory("MockWETH", maker);
-    const weth = await MockWETH.deploy();
-    await weth.waitForDeployment();
-
-    // Deploy LOP
-    const LimitOrderProtocol = await ethers.getContractFactory("LimitOrderProtocol", maker);
-    const lop = await LimitOrderProtocol.deploy(weth.target);
-    await lop.waitForDeployment();
-
-    // Deploy OptionsNFT
-    const OptionNFT = await ethers.getContractFactory("OptionNFT", maker);
-    const optionsNFT = await OptionNFT.deploy(lop.target);
-    await optionsNFT.waitForDeployment();
-
-    console.log('✅ Contracts deployed:');
-    console.log(`   MockETH: ${mockETH.target}`);
-    console.log(`   MockUSDC: ${mockUSDC.target}`);
-    console.log(`   LOP: ${lop.target}`);
-    console.log(`   OptionsNFT: ${optionsNFT.target}`);
+    // Get contract instances
+    const mockETH = await ethers.getContractAt("MockERC20", addresses.mockETHAddress);
+    const mockUSDC = await ethers.getContractAt("MockERC20", addresses.mockUSDCAddress);
+    const lop = await ethers.getContractAt("LimitOrderProtocol", addresses.lopAddress);
+    const optionsNFT = await ethers.getContractAt("OptionNFT", addresses.optionsNFTAddress);
 
     // Setup contract parameters
     console.log('\n⚙️ Setting up contract parameters...');
@@ -68,8 +56,8 @@ async function createOptionsOrderSimple() {
     const optionAmount = ethers.parseEther("1");
     
     await optionsNFT.setDefaultOptionParams(
-      mockETH.target,
-      mockUSDC.target,
+      addresses.mockETHAddress,
+      addresses.mockUSDCAddress,
       strikePrice,
       optionAmount
     );
@@ -79,8 +67,8 @@ async function createOptionsOrderSimple() {
     const usdcAmount = ethers.parseUnits("50000", 6);
     
     await mockETH.mint(maker.address, ethAmount);
-    await mockETH.connect(maker).approve(lop.target, ethAmount);
-    await mockETH.connect(maker).approve(optionsNFT.target, ethAmount);
+    await mockETH.connect(maker).approve(addresses.lopAddress, ethAmount);
+    await mockETH.connect(maker).approve(addresses.optionsNFTAddress, ethAmount);
 
     console.log('✅ Contract setup complete');
 
@@ -93,18 +81,18 @@ async function createOptionsOrderSimple() {
     await setupDummyTokensForMaker({
       dummyTokenAddress: dummyToken.target,
       maker: maker.address,
-      lopAddress: lop.target,
+      lopAddress: addresses.lopAddress,
       optionAmount: optionAmount
     });
 
     // Create order hash manager for OptionsNFT salt
     console.log('\n🔍 Creating order hash manager for OptionsNFT salt...');
-    const hashManager = createOrderHashManager(optionsNFT.target, ethers.provider);
+    const hashManager = createOrderHashManager(addresses.optionsNFTAddress, ethers.provider);
     
     // Generate unique salt using hash manager
     const optionParams = {
-      underlyingAsset: mockETH.target,
-      strikeAsset: mockUSDC.target,
+      underlyingAsset: addresses.mockETHAddress,
+      strikeAsset: addresses.mockUSDCAddress,
       strikePrice: strikePrice,
       expiry: Math.floor(Date.now() / 1000) + 86400,
       optionAmount: optionAmount
@@ -113,14 +101,14 @@ async function createOptionsOrderSimple() {
     const salt = hashManager.generateUniqueSalt(maker.address, optionParams);
     console.log(`   Generated OptionsNFT salt: ${salt}`);
 
-    // 🎯 SIMPLIFIED: Get nonce using simple approach
-    console.log('\n🎯 Getting nonce using simplified approach...');
+    // 🎯 SIMPLIFIED: Get nonce using random approach (1inch pattern)
+    console.log('\n🎲 Getting nonce using random approach (1inch pattern)...');
     
-    // Initialize simple nonce manager using helper
-    const nonceManager = createSimpleNonceManager();
+    // Initialize random nonce manager using helper
+    const nonceManager = createRandomNonceManager();
     
-    // Get next nonce (simple sequential approach)
-    const lopNonce = await nonceManager.getNextNonce(maker.address, lop);
+    // Get random nonce (1inch pattern)
+    const lopNonce = await nonceManager.getRandomNonce(maker.address, lop);
 
     // Create MakerTraits using simplified approach
     const makerTraitsBigInt = createMakerTraitsSimple({
@@ -137,15 +125,15 @@ async function createOptionsOrderSimple() {
 
     const completeOption = await buildCompleteCallOption({
       makerSigner: maker,
-      underlyingAsset: mockETH.target,
-      strikeAsset: mockUSDC.target,
+      underlyingAsset: addresses.mockETHAddress,
+      strikeAsset: addresses.mockUSDCAddress,
       dummyTokenAddress: dummyToken.target,
       strikePrice: strikePrice,
       optionAmount: optionAmount,
       premium: premium,
       expiry: expiry,
-      lopAddress: lop.target,
-      optionsNFTAddress: optionsNFT.target,
+      lopAddress: addresses.lopAddress,
+      optionsNFTAddress: addresses.optionsNFTAddress,
       salt: salt,
       lopNonce: lopNonce
       // Removed customMakerTraits to let helper function generate MakerTraits internally
@@ -154,8 +142,8 @@ async function createOptionsOrderSimple() {
     console.log('✅ Complete option order built successfully with simplified approach');
     console.log('   Order details:');
     console.log('     Maker:', maker.address);
-    console.log('     Underlying Asset:', mockETH.target);
-    console.log('     Strike Asset:', mockUSDC.target);
+    console.log('     Underlying Asset:', addresses.mockETHAddress);
+    console.log('     Strike Asset:', addresses.mockUSDCAddress);
     console.log('     Strike Price:', ethers.formatUnits(strikePrice, 6), 'USDC per ETH');
     console.log('     Option Amount:', ethers.formatEther(optionAmount), 'ETH');
     console.log('     Premium:', ethers.formatUnits(premium, 6), 'USDC');
@@ -164,11 +152,11 @@ async function createOptionsOrderSimple() {
     console.log('     LOP Nonce (Simple):', lopNonce);
     console.log('     MakerTraits (Simplified):', makerTraitsBigInt.toString(16));
 
-    // Test multiple orders with sequential nonces (like the example)
-    console.log('\n🧪 Testing multiple orders with sequential nonces...');
+    // Test multiple orders with random nonces (1inch pattern)
+    console.log('\n🧪 Testing multiple orders with random nonces (1inch pattern)...');
     const orders = [];
     for (let i = 0; i < 3; i++) {
-      const orderNonce = await nonceManager.getNextNonce(maker.address, lop);
+      const orderNonce = await nonceManager.getRandomNonce(maker.address, lop);
       const orderTraits = createMakerTraitsSimple({
         nonce: orderNonce,
         allowPartialFill: false,
@@ -182,7 +170,7 @@ async function createOptionsOrderSimple() {
         orderNumber: i + 1
       });
       
-      console.log(`   Order ${i + 1}: Nonce ${orderNonce} → Traits: ${orderTraits.toString(16)}`);
+      console.log(`   Order ${i + 1}: Random Nonce ${orderNonce} → Traits: ${orderTraits.toString(16)}`);
     }
 
     // Prepare order for backend submission
@@ -203,10 +191,10 @@ async function createOptionsOrderSimple() {
         s: completeOption.lopSignature.s,
         v: completeOption.lopSignature.v
       },
-      lopAddress: lop.target,
+      lopAddress: addresses.lopAddress,
       optionParams: {
-        underlyingAsset: mockETH.target,
-        strikeAsset: mockUSDC.target,
+        underlyingAsset: addresses.mockETHAddress,
+        strikeAsset: addresses.mockUSDCAddress,
         strikePrice: strikePrice.toString(),
         optionAmount: optionAmount.toString(),
         premium: premium.toString(),
@@ -217,12 +205,12 @@ async function createOptionsOrderSimple() {
         s: completeOption.optionsNFTSignature.s,
         v: completeOption.optionsNFTSignature.v
       },
-      optionsNFTAddress: optionsNFT.target
+      optionsNFTAddress: addresses.optionsNFTAddress
     };
 
     // Submit order to backend
     console.log('\n📤 Submitting order to backend...');
-    const response = await axios.post(`${BACKEND_URL}/api/orders`, backendOrder);
+    const response = await axios.post(`${addresses.backendUrl}/api/orders`, backendOrder);
     console.log('✅ Order submitted successfully!');
     console.log('   Order Hash:', response.data.data.orderHash);
     console.log('   Order ID:', response.data.data.id);
@@ -232,14 +220,14 @@ async function createOptionsOrderSimple() {
 
     // Test order retrieval
     console.log('\n📋 Testing order retrieval...');
-    const getOrderResponse = await axios.get(`${BACKEND_URL}/api/orders/${orderHash}`);
+    const getOrderResponse = await axios.get(`${addresses.backendUrl}/api/orders/${orderHash}`);
     console.log('✅ Order retrieved successfully');
     console.log('   Maker:', getOrderResponse.data.data.maker);
     console.log('   Status:', getOrderResponse.data.data.status);
 
     // Test browsing orders
     console.log('\n📋 Testing order browsing...');
-    const browseResponse = await axios.get(`${BACKEND_URL}/api/orders?status=open&limit=10`);
+    const browseResponse = await axios.get(`${addresses.backendUrl}/api/orders?status=open&limit=10`);
     console.log('✅ Orders browsed successfully');
     console.log(`   Total open orders: ${browseResponse.data.data.count}`);
     
@@ -257,10 +245,10 @@ async function createOptionsOrderSimple() {
     const fillData = {
       taker: takerAddress,
       fillAmount: premium.toString(),
-      lopAddress: lop.target
+      lopAddress: addresses.lopAddress
     };
     
-    const fillResponse = await axios.post(`${BACKEND_URL}/api/orders/${orderHash}/fill`, fillData);
+    const fillResponse = await axios.post(`${addresses.backendUrl}/api/orders/${orderHash}/fill`, fillData);
     console.log('✅ Fill calldata generated successfully');
     console.log('   Message:', fillResponse.data.data.message);
     console.log('   Estimated Gas:', fillResponse.data.data.estimatedGas);
@@ -273,13 +261,13 @@ async function createOptionsOrderSimple() {
     // Setup taker
     const takerSigner = new ethers.Wallet('0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a', ethers.provider); // Hardhat account #2
     await mockUSDC.mint(takerSigner.address, usdcAmount);
-    await mockUSDC.connect(takerSigner).approve(lop.target, usdcAmount);
+    await mockUSDC.connect(takerSigner).approve(addresses.lopAddress, usdcAmount);
 
     // Use helper to prepare order for filling
     const fillParams = prepareOrderForFilling(completeOption, premium);
     
     // Fill the order on-chain
-    const lopContract = await ethers.getContractAt("LimitOrderProtocol", lop.target, takerSigner);
+    const lopContract = await ethers.getContractAt("LimitOrderProtocol", addresses.lopAddress, takerSigner);
     const tx = await lopContract.fillOrderArgs(
       fillParams.orderTuple,
       fillParams.r,
@@ -305,6 +293,7 @@ async function createOptionsOrderSimple() {
     console.log('   ✅ Used createOrderHashManager for OptionsNFT salt generation');
     console.log('   ✅ Used buildCompleteCallOption for order creation');
     console.log('   ✅ Used reusable helper functions from nonceManager.js');
+    console.log('   ✅ Used new envLoader utility for address management');
     console.log('   ✅ Backend integration working perfectly');
     console.log('   ✅ On-chain order filling successful');
     console.log('   ✅ NFT minting confirmed');
@@ -315,10 +304,10 @@ async function createOptionsOrderSimple() {
       makerTraitsBigInt: makerTraitsBigInt.toString(16),
       orders: orders,
       contracts: {
-        lop: lop.target,
-        optionsNFT: optionsNFT.target,
-        mockETH: mockETH.target,
-        mockUSDC: mockUSDC.target
+        lop: addresses.lopAddress,
+        optionsNFT: addresses.optionsNFTAddress,
+        mockETH: addresses.mockETHAddress,
+        mockUSDC: addresses.mockUSDCAddress
       },
       orderData: completeOption
     };

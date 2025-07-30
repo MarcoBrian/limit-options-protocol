@@ -1,0 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background-color: #f3f3f3;
+    color: #2d334a;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-white px-4 py-2 rounded-lg font-medium hover:bg-primary-hover transition-colors duration-200 shadow-button;
+  }
+  
+  .btn-secondary {
+    @apply bg-white text-primary border border-primary px-4 py-2 rounded-lg font-medium hover:bg-gray-50 transition-colors duration-200 shadow-button;
+  }
+  
+  .card {
+    @apply bg-white rounded-xl shadow-card p-6 border border-border-light;
+  }
+  
+  .input-field {
+    @apply w-full px-3 py-2 border border-border-light rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent;
+  }
+  
+  .form-label {
+    @apply block text-sm font-medium text-text-primary mb-2;
+  }
+}
+
+@layer utilities {
+  .animate-slide-up {
+    animation: slideUp 0.3s ease-out;
+  }
+  
+  @keyframes slideUp {
+    from {
+      transform: translateY(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+}

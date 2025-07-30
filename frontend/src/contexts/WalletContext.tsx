@@ -1,0 +1,168 @@
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { ethers } from 'ethers';
+import { WalletContextType } from '../types';
+import { useToast } from './ToastContext';
+
+const WalletContext = createContext<WalletContextType | undefined>(undefined);
+
+interface WalletProviderProps {
+  children: ReactNode;
+}
+
+export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
+  const [account, setAccount] = useState<string | null>(null);
+  const [provider, setProvider] = useState<any>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const { showToast } = useToast();
+
+  useEffect(() => {
+    // Check if MetaMask is installed
+    if (typeof window.ethereum !== 'undefined') {
+      const ethereum = window.ethereum;
+      const provider = new ethers.BrowserProvider(ethereum);
+      setProvider(provider);
+
+      // Check if already connected
+      ethereum.request({ method: 'eth_accounts' })
+        .then((accounts: string[]) => {
+          if (accounts.length > 0) {
+            setAccount(accounts[0]);
+            setIsConnected(true);
+          }
+        })
+        .catch((err: any) => {
+          console.error('Error checking existing accounts:', err);
+          showToast('Failed to check existing connection', 'error');
+        });
+
+      // Listen for account changes
+      ethereum.on('accountsChanged', (accounts: string[]) => {
+        if (accounts.length > 0) {
+          setAccount(accounts[0]);
+          setIsConnected(true);
+        } else {
+          setAccount(null);
+          setIsConnected(false);
+        }
+      });
+
+      // Listen for chain changes
+      ethereum.on('chainChanged', () => {
+        // Optionally handle chain changes
+        console.log('Network changed');
+      });
+    } else {
+      showToast('MetaMask is not installed', 'error');
+    }
+  }, [showToast]);
+
+  const connect = async () => {
+    try {
+      setIsConnecting(true);
+
+      if (typeof window.ethereum === 'undefined') {
+        throw new Error('MetaMask is not installed. Please install MetaMask to use this application.');
+      }
+
+      const ethereum = window.ethereum;
+      const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+      
+      if (accounts.length > 0) {
+        setAccount(accounts[0]);
+        setIsConnected(true);
+        const provider = new ethers.BrowserProvider(ethereum);
+        setProvider(provider);
+        showToast('Wallet connected successfully!', 'success');
+      } else {
+        throw new Error('No accounts found');
+      }
+    } catch (error: any) {
+      console.error('Error connecting to MetaMask:', error);
+      
+      // Handle specific MetaMask errors
+      if (error.code === 4001) {
+        showToast('Connection cancelled by user', 'warning');
+      } else if (error.code === -32002) {
+        showToast('Please check MetaMask - connection request is pending', 'warning');
+      } else if (error.code === -32003) {
+        showToast('MetaMask is locked. Please unlock MetaMask and try again', 'error');
+      } else if (error.message?.includes('MetaMask is not installed')) {
+        showToast('MetaMask is not installed. Please install MetaMask to use this application.', 'error');
+      } else if (error.message?.includes('User rejected')) {
+        showToast('Connection was rejected. Please try again.', 'warning');
+      } else {
+        showToast(error.message || 'Failed to connect to MetaMask', 'error');
+      }
+      
+      // Reset connection state
+      setAccount(null);
+      setIsConnected(false);
+      setProvider(null);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const disconnect = () => {
+    setAccount(null);
+    setIsConnected(false);
+    setProvider(null);
+    showToast('Wallet disconnected', 'info');
+  };
+
+  const signMessage = async (message: string): Promise<string> => {
+    if (!provider || !account) {
+      throw new Error('Wallet not connected');
+    }
+
+    try {
+      const signer = await provider.getSigner();
+      const signature = await signer.signMessage(message);
+      return signature;
+    } catch (error: any) {
+      console.error('Error signing message:', error);
+      
+      if (error.code === 4001) {
+        throw new Error('Message signing was cancelled by user');
+      } else if (error.code === -32002) {
+        throw new Error('Please check MetaMask - signing request is pending');
+      } else if (error.code === -32003) {
+        throw new Error('MetaMask is locked. Please unlock MetaMask and try again');
+      } else {
+        throw new Error(error.message || 'Failed to sign message');
+      }
+    }
+  };
+
+  const value: WalletContextType = {
+    account,
+    isConnected,
+    isConnecting,
+    connect,
+    disconnect,
+    signMessage,
+    provider,
+  };
+
+  return (
+    <WalletContext.Provider value={value}>
+      {children}
+    </WalletContext.Provider>
+  );
+};
+
+export const useWallet = (): WalletContextType => {
+  const context = useContext(WalletContext);
+  if (context === undefined) {
+    throw new Error('useWallet must be used within a WalletProvider');
+  }
+  return context;
+};
+
+// Extend Window interface for TypeScript
+declare global {
+  interface Window {
+    ethereum?: any;
+  }
+} 

@@ -1,329 +1,222 @@
-const { ethers } = require("hardhat");
+const { ethers } = require('hardhat');
+
+// Import the REAL MakerTraits class from the correct SDK
+const { MakerTraits } = require('@1inch/limit-order-sdk');
 
 /**
- * Order Hash Manager for OptionsNFT
- * 
- * Manages order hash generation and validation for the salt-based replay protection system.
- * This replaces the old nonce-based system to allow parallel off-chain order creation.
+ * Order Hash Manager for OptionsNFT salt generation
  */
 class OrderHashManager {
-  constructor(optionsNFTAddress, provider = null) {
-    this.optionsNFTAddress = optionsNFTAddress;
-    this.provider = provider || ethers.provider;
-    this.contract = null;
+  constructor(contractAddress, provider) {
+    this.contractAddress = contractAddress;
+    this.provider = provider;
+    this.usedSalts = new Set();
   }
 
-  /**
-   * Get or create the OptionsNFT contract instance
-   * @returns {Promise<Contract>} OptionsNFT contract instance
-   */
-  async getContract() {
-    if (!this.contract) {
-      try {
-        this.contract = await ethers.getContractAt("OptionNFT", this.optionsNFTAddress);
-      } catch (error) {
-        console.error("Failed to get OptionsNFT contract:", error.message);
-        throw new Error(`Cannot connect to OptionsNFT at ${this.optionsNFTAddress}`);
-      }
-    }
-    return this.contract;
-  }
+  generateUniqueSalt(makerAddress, optionParams) {
+    const saltData = {
+      maker: makerAddress,
+      underlyingAsset: optionParams.underlyingAsset,
+      strikeAsset: optionParams.strikeAsset,
+      strikePrice: optionParams.strikePrice.toString(),
+      expiry: optionParams.expiry,
+      optionAmount: optionParams.optionAmount.toString()
+    };
 
-  /**
-   * Generate a unique salt for option parameters
-   * @param {string} maker - Maker address
-   * @param {Object} optionParams - Option parameters
-   * @returns {number} Unique salt
-   */
-  generateUniqueSalt(maker, optionParams) {
-    // Create a hash of the maker and option parameters plus timestamp for uniqueness
-    const data = ethers.AbiCoder.defaultAbiCoder().encode(
-      ["address", "address", "address", "uint256", "uint256", "uint256", "uint256", "uint256"],
-      [
-        maker,
-        optionParams.underlyingAsset,
-        optionParams.strikeAsset,
-        optionParams.strikePrice,
-        optionParams.expiry,
-        optionParams.optionAmount,
-        Date.now(),
-        Math.floor(Math.random() * 1000000)  // Smaller random number to avoid overflow
-      ]
-    );
-    
-    const hash = ethers.keccak256(data);
-    // Use a simple approach: take first 8 hex chars and convert to number
-    // This gives us a number in range 0 to 4,294,967,295 (32-bit)
-    const saltHex = hash.slice(2, 10); // Take first 8 hex characters
-    return parseInt(saltHex, 16);
-  }
+    const saltHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(saltData)));
+    const salt = ethers.getBigInt(saltHash) % ethers.getBigInt("0xffffffffffffffffffffffffffffffffffffffff");
 
-  /**
-   * Generate multiple unique salts
-   * @param {string} maker - Maker address
-   * @param {Object} optionParams - Option parameters
-   * @param {number} count - Number of salts to generate
-   * @returns {number[]} Array of unique salts
-   */
-  generateMultipleSalts(maker, optionParams, count = 1) {
-    const salts = [];
-    for (let i = 0; i < count; i++) {
-      // Add a small delay and counter to ensure uniqueness
-      const uniqueParams = {
-        ...optionParams,
-        _counter: i,
-        _timestamp: Date.now() + i
-      };
-      salts.push(this.generateUniqueSalt(maker, uniqueParams));
-    }
-    return salts;
-  }
-
-  /**
-   * Check if an option hash is available (not used)
-   * @param {string} maker - Maker address
-   * @param {Object} optionParams - Option parameters
-   * @param {number} salt - Salt for uniqueness
-   * @returns {Promise<boolean>} True if hash is available
-   */
-  async isOrderHashAvailable(maker, optionParams, salt) {
-    try {
-      const contract = await this.getContract();
-      return await contract.isOptionHashAvailable(
-        optionParams.underlyingAsset,
-        optionParams.strikeAsset,
-        maker,
-        optionParams.strikePrice,
-        optionParams.expiry,
-        optionParams.optionAmount,
-        salt
-      );
-    } catch (error) {
-      console.error("Error checking order hash availability:", error.message);
-      return false;
-    }
-  }
-
-  /**
-   * Generate the option hash for given parameters
-   * @param {string} maker - Maker address
-   * @param {Object} optionParams - Option parameters
-   * @param {number} salt - Salt for uniqueness
-   * @returns {Promise<string>} Option hash
-   */
-  async generateOptionHash(maker, optionParams, salt) {
-    try {
-      const contract = await this.getContract();
-      return await contract.generateOptionHash(
-        optionParams.underlyingAsset,
-        optionParams.strikeAsset,
-        maker,
-        optionParams.strikePrice,
-        optionParams.expiry,
-        optionParams.optionAmount,
-        salt
-      );
-    } catch (error) {
-      console.error("Error generating option hash:", error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Find an available salt for the given parameters
-   * @param {string} maker - Maker address
-   * @param {Object} optionParams - Option parameters
-   * @param {number} maxAttempts - Maximum attempts to find available salt
-   * @returns {Promise<number>} Available salt
-   */
-  async findAvailableSalt(maker, optionParams, maxAttempts = 10) {
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const salt = this.generateUniqueSalt(maker, optionParams);
-      const isAvailable = await this.isOrderHashAvailable(maker, optionParams, salt);
-      
-      if (isAvailable) {
-        return salt;
-      }
-      
-      // Small delay to ensure different timestamps
-      await new Promise(resolve => setTimeout(resolve, 1));
-    }
-    
-    throw new Error(`Could not find available salt after ${maxAttempts} attempts`);
-  }
-
-  /**
-   * Get comprehensive order hash information
-   * @param {string} maker - Maker address
-   * @param {Object} optionParams - Option parameters
-   * @param {number} salt - Salt for uniqueness
-   * @returns {Promise<Object>} Order hash information
-   */
-  async getOrderHashInfo(maker, optionParams, salt) {
-    try {
-      const isAvailable = await this.isOrderHashAvailable(maker, optionParams, salt);
-      const optionHash = await this.generateOptionHash(maker, optionParams, salt);
-      
-      return {
-        maker,
-        optionParams,
-        salt,
-        optionHash,
-        isAvailable,
-        isUsed: !isAvailable,
-        timestamp: new Date().toISOString()
-      };
-    } catch (error) {
-      console.error("Error getting order hash info:", error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Validate order hash parameters
-   * @param {string} maker - Maker address
-   * @param {Object} optionParams - Option parameters
-   * @param {number} salt - Salt for uniqueness
-   * @returns {Promise<Object>} Validation result
-   */
-  async validateOrderHash(maker, optionParams, salt) {
-    try {
-      // Basic parameter validation
-      if (!maker || !ethers.isAddress(maker)) {
-        return { valid: false, error: "Invalid maker address" };
-  }
-
-      if (!optionParams.underlyingAsset || !ethers.isAddress(optionParams.underlyingAsset)) {
-        return { valid: false, error: "Invalid underlying asset address" };
-      }
-
-      if (!optionParams.strikeAsset || !ethers.isAddress(optionParams.strikeAsset)) {
-        return { valid: false, error: "Invalid strike asset address" };
-      }
-
-      if (!optionParams.strikePrice || optionParams.strikePrice <= 0) {
-        return { valid: false, error: "Invalid strike price" };
-      }
-
-      if (!optionParams.expiry || optionParams.expiry <= Math.floor(Date.now() / 1000)) {
-        return { valid: false, error: "Invalid or past expiry" };
-      }
-
-      if (!optionParams.optionAmount || optionParams.optionAmount <= 0) {
-        return { valid: false, error: "Invalid option amount" };
-      }
-
-      if (salt === null || salt === undefined || salt < 0) {
-        return { valid: false, error: "Invalid salt" };
-      }
-
-      // Check if hash is available
-      const isAvailable = await this.isOrderHashAvailable(maker, optionParams, salt);
-      if (!isAvailable) {
-        return { valid: false, error: "Order hash already used" };
-      }
-
-      return { valid: true, error: null };
-    } catch (error) {
-      return { valid: false, error: error.message };
-    }
-  }
-
-  /**
-   * Create multiple parallel orders with unique salts
-   * @param {string} maker - Maker address
-   * @param {Object} baseOptionParams - Base option parameters
-   * @param {number} count - Number of orders to create
-   * @returns {Promise<Object[]>} Array of order configurations
-   */
-  async createParallelOrders(maker, baseOptionParams, count) {
-    try {
-      const orders = [];
-
-      for (let i = 0; i < count; i++) {
-        // Generate unique salt for each order
-        const salt = await this.findAvailableSalt(maker, baseOptionParams);
-        
-        // Create order configuration
-        const orderConfig = {
-          maker,
-          optionParams: { ...baseOptionParams },
-          salt,
-          orderIndex: i,
-          timestamp: new Date().toISOString()
-        };
-        
-        orders.push(orderConfig);
+    // Ensure uniqueness
+    if (this.usedSalts.has(salt.toString())) {
+      return this.generateUniqueSalt(makerAddress, { ...optionParams, expiry: optionParams.expiry + 1 });
     }
 
-      return orders;
-    } catch (error) {
-      console.error("Error creating parallel orders:", error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * Get statistics about order hash usage (for monitoring)
-   * @param {string} maker - Maker address
-   * @param {Object} optionParams - Option parameters
-   * @param {number} sampleSize - Number of salts to sample
-   * @returns {Promise<Object>} Usage statistics
-   */
-  async getUsageStats(maker, optionParams, sampleSize = 100) {
-    try {
-      let availableCount = 0;
-      let usedCount = 0;
-      const sampleSalts = this.generateMultipleSalts(maker, optionParams, sampleSize);
-    
-      for (const salt of sampleSalts) {
-        const isAvailable = await this.isOrderHashAvailable(maker, optionParams, salt);
-        if (isAvailable) {
-          availableCount++;
-    } else {
-          usedCount++;
-        }
-      }
-      
-      return {
-        maker,
-        sampleSize,
-        availableCount,
-        usedCount,
-        availablePercentage: (availableCount / sampleSize) * 100,
-        usedPercentage: (usedCount / sampleSize) * 100,
-        timestamp: new Date().toISOString()
-      };
-    } catch (error) {
-      console.error("Error getting usage stats:", error.message);
-      throw error;
-    }
+    this.usedSalts.add(salt.toString());
+    return salt.toString();
   }
 }
 
 /**
- * Create a new OrderHashManager instance
- * @param {string} optionsNFTAddress - OptionsNFT contract address
- * @param {Object} provider - Ethereum provider (optional)
+ * Simple Nonce Manager - Based on the user's example pattern
+ * Reusable helper for managing LOP nonces with sequential approach
+ */
+class SimpleNonceManager {
+  constructor() {
+    this.localNonces = new Map(); // maker -> next nonce
+  }
+  
+  /**
+   * Get current nonce from LOP contract (simplified approach)
+   * @param {string} maker - Maker address
+   * @param {Object} lopContract - LOP contract instance
+   * @returns {Promise<bigint>} Current nonce
+   */
+  async getCurrentNonce(maker, lopContract) {
+    console.log(`🔍 Getting current nonce for ${maker} from LOP...`);
+    
+    try {
+      // Try to get nonce from contract (if available)
+      const nonce = await lopContract.nonces(maker);
+      console.log(`   ✅ Current nonce from contract: ${nonce}`);
+      return BigInt(nonce.toString());
+    } catch (error) {
+      console.log(`   ⚠️ Contract nonce method not available, using local counter`);
+      // Fallback to local counter if contract method doesn't exist
+      if (!this.localNonces.has(maker)) {
+        this.localNonces.set(maker, 0n);
+      }
+      return this.localNonces.get(maker);
+    }
+  }
+  
+  /**
+   * Get next nonce for a maker (simple sequential approach)
+   * @param {string} maker - Maker address
+   * @param {Object} lopContract - LOP contract instance
+   * @returns {Promise<bigint>} Next nonce
+   */
+  async getNextNonce(maker, lopContract) {
+    // Get current nonce
+    const currentNonce = await this.getCurrentNonce(maker, lopContract);
+    
+    // Use local counter if we have one, otherwise use current + 1
+    if (this.localNonces.has(maker)) {
+      const localNonce = this.localNonces.get(maker);
+      this.localNonces.set(maker, localNonce + 1n);
+      console.log(`   📦 Using local nonce: ${localNonce}`);
+      return localNonce;
+    } else {
+      // Start from current + 1
+      const nextNonce = currentNonce + 1n;
+      this.localNonces.set(maker, nextNonce + 1n);
+      console.log(`   🔗 Using sequential nonce: ${nextNonce}`);
+      return nextNonce;
+    }
+  }
+  
+  /**
+   * Reset local nonce for a maker (useful for testing)
+   * @param {string} maker - Maker address
+   */
+  resetNonce(maker) {
+    this.localNonces.delete(maker);
+    console.log(`   🔄 Reset nonce for ${maker}`);
+  }
+}
+
+/**
+ * Create MakerTraits using the REAL MakerTraits class (simplified)
+ * Reusable helper for creating MakerTraits with proper SDK usage
+ * @param {Object} options - MakerTraits options
+ * @returns {bigint} Properly formatted MakerTraits using real SDK
+ */
+function createMakerTraitsSimple(options = {}) {
+  console.log(`🔧 Creating MakerTraits with REAL @1inch/limit-order-sdk (Simple)...`);
+  
+  // Use the REAL MakerTraits class - simple approach like the example
+  let traits = MakerTraits.default();
+  
+  // Set nonce using SDK (like the example)
+  if (options.nonce !== undefined) {
+    traits = traits.withNonce(BigInt(options.nonce));
+    console.log(`   ✅ Set nonce: ${options.nonce}`);
+  }
+  
+  // Set flags using SDK methods
+  if (options.allowPartialFill === false) {
+    traits = traits.disablePartialFills();
+    console.log(`   ✅ Disabled partial fills`);
+  }
+  
+  if (options.allowMultipleFills === false) {
+    traits = traits.disableMultipleFills();
+    console.log(`   ✅ Disabled multiple fills`);
+  }
+  
+  if (options.postInteraction) {
+    traits = traits.enablePostInteraction();
+    console.log(`   ✅ Enabled post-interaction`);
+  }
+  
+  if (options.preInteraction) {
+    traits = traits.enablePreInteraction();
+    console.log(`   ✅ Enabled pre-interaction`);
+  }
+  
+  if (options.usePermit2) {
+    traits = traits.enablePermit2();
+    console.log(`   ✅ Enabled Permit2`);
+  }
+  
+  if (options.unwrapWeth) {
+    traits = traits.enableNativeUnwrap();
+    console.log(`   ✅ Enabled WETH unwrapping`);
+  }
+  
+  // Handle allowedSender more carefully to avoid SDK compatibility issues
+  if (options.allowedSender && options.allowedSender !== '0x0000000000000000000000000000000000000000') {
+    try {
+      // Only set if it's a valid non-zero address
+      traits = traits.withAllowedSender(options.allowedSender);
+      console.log(`   ✅ Set allowed sender: ${options.allowedSender}`);
+    } catch (error) {
+      console.log(`   ⚠️ Skipped allowed sender due to SDK compatibility: ${error.message}`);
+    }
+  }
+  
+  if (options.expiration) {
+    traits = traits.withExpiration(BigInt(options.expiration));
+    console.log(`   ✅ Set expiration: ${options.expiration}`);
+  }
+  
+  // Log SDK analysis
+  const extractedNonce = traits.nonceOrEpoch();
+  const isBitInvalidator = traits.isBitInvalidatorMode();
+  
+  console.log(`   📊 SDK Analysis:`);
+  console.log(`      Nonce set: ${options.nonce || 0} → Extracted: ${extractedNonce}`);
+  console.log(`      BitInvalidator mode: ${isBitInvalidator}`);
+  console.log(`      Partial fills allowed: ${traits.isPartialFillAllowed()}`);
+  console.log(`      Multiple fills allowed: ${traits.isMultipleFillsAllowed()}`);
+  console.log(`      Has post-interaction: ${traits.hasPostInteraction()}`);
+  console.log(`      Is private: ${traits.isPrivate()}`);
+  
+  // Return as bigint for compatibility with existing code
+  return traits.asBigInt();
+}
+
+/**
+ * Quick salt generation for testing
+ * @param {string} makerAddress - Maker address
+ * @returns {string} Random salt
+ */
+function quickSalt(makerAddress) {
+  return Math.floor(Math.random() * Date.now()).toString();
+}
+
+/**
+ * Create OrderHashManager instance
+ * @param {string} contractAddress - Contract address
+ * @param {Object} provider - Ethers provider
  * @returns {OrderHashManager} OrderHashManager instance
  */
-function createOrderHashManager(optionsNFTAddress, provider = null) {
-  return new OrderHashManager(optionsNFTAddress, provider);
+function createOrderHashManager(contractAddress, provider) {
+  return new OrderHashManager(contractAddress, provider);
 }
 
 /**
- * Utility function to generate a quick salt
- * @param {string} maker - Maker address
- * @param {Object} optionParams - Option parameters
- * @returns {number} Generated salt
+ * Create SimpleNonceManager instance
+ * @returns {SimpleNonceManager} SimpleNonceManager instance
  */
-function quickSalt(maker, optionParams) {
-  const manager = new OrderHashManager("0x0000000000000000000000000000000000000000");
-  return manager.generateUniqueSalt(maker, optionParams);
+function createSimpleNonceManager() {
+  return new SimpleNonceManager();
 }
 
 module.exports = {
   OrderHashManager,
+  SimpleNonceManager,
   createOrderHashManager,
+  createSimpleNonceManager,
+  createMakerTraitsSimple,
   quickSalt
 }; 

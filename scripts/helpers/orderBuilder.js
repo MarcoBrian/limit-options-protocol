@@ -96,7 +96,8 @@ function buildOrder(params) {
     makingAmount,
     takingAmount,
     makerTraits = {},
-    lopNonce = 0  // CRITICAL FIX: Accept lopNonce parameter
+    lopNonce = 0,  // CRITICAL FIX: Accept lopNonce parameter
+    customMakerTraits = null  // NEW: Accept pre-built MakerTraits (e.g., from SDK)
   } = params;
 
   const salt = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
@@ -109,7 +110,8 @@ function buildOrder(params) {
     takerAsset: toAddressType(takerAsset),
     makingAmount: ethers.getBigInt(makingAmount),
     takingAmount: ethers.getBigInt(takingAmount),
-    makerTraits: setMakerTraits(makerTraits, lopNonce)  // CRITICAL FIX: Pass lopNonce
+    // Use custom MakerTraits if provided, otherwise build from flags
+    makerTraits: customMakerTraits !== null ? customMakerTraits : setMakerTraits(makerTraits, lopNonce)
   };
 
   const orderTuple = [
@@ -214,7 +216,8 @@ function buildCallOptionOrder(params) {
     premium,
     expiry,
     lopNonce,
-    makerTraits = {}
+    makerTraits = {},
+    customMakerTraits = null  // NEW: Accept pre-built MakerTraits
   } = params;
 
   // Default maker traits with no partial fills
@@ -233,7 +236,8 @@ function buildCallOptionOrder(params) {
     makingAmount: optionAmount,    // Maker "offers" option amount (dummy tokens)
     takingAmount: premium,         // Taker pays premium
     makerTraits: defaultMakerTraits,
-    lopNonce: finalLopNonce        // CRITICAL FIX: Pass the nonce
+    lopNonce: finalLopNonce,        // CRITICAL FIX: Pass the nonce
+    customMakerTraits: customMakerTraits  // NEW: Pass custom traits
   });
 
   return {
@@ -456,7 +460,8 @@ async function buildCompleteCallOption(params) {
     lopAddress,
     optionsNFTAddress,
     salt,
-    lopNonce
+    lopNonce,
+    customMakerTraits = null  // NEW: Accept pre-built MakerTraits from SDK
   } = params;
 
   // Auto-generate salt if not provided
@@ -482,7 +487,8 @@ async function buildCompleteCallOption(params) {
     optionAmount,
     premium,
     expiry,
-    lopNonce
+    lopNonce,
+    customMakerTraits: customMakerTraits  // NEW: Pass custom traits
   });
 
   // 2. Sign the LOP order

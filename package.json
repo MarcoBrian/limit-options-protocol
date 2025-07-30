@@ -5,11 +5,16 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "test:lop": "npx hardhat run scripts/test-limit-order-protocol.js --network localhost",
+    "test:options": "npx hardhat run scripts/test-options.js --network localhost",
     "test:backend-only": "node backend/test-backend-with-data.js",
-    "test:backend-helpers": "npx hardhat run backend/test-with-helpers.js --network localhost",
-    "test:backend-complete": "node backend/test-complete-system.js",
+    "test:helpers": "npx hardhat run backend/test-with-helpers.js --network localhost",
+    "test:makers-traits-simple": "npx hardhat run backend/test-simple-maker-traits.js --network localhost",
+    "test:complete": "node backend/test-complete-system.js",
+    "debug:backend": "node backend/debug-backend.js",
     "start": "node backend/server.js",
-    "dev": "nodemon backend/server.js"
+    "dev": "nodemon backend/server.js",
+    "test:relayer": "node backend/test/test-relayer.js"
   },
   "keywords": [],
   "author": "",
@@ -21,6 +26,7 @@
     "nodemon": "^3.1.10"
   },
   "dependencies": {
+    "@1inch/byte-utils": "^3.1.0",
     "@1inch/limit-order-protocol-utils": "^4.0.1",
     "@1inch/limit-order-sdk": "^4.9.5-rc.0",
     "@1inch/solidity-utils": "^6.6.0",

@@ -55,6 +55,7 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
     event CollateralProvided(uint256 indexed optionId, address indexed maker, uint256 amount, uint256 timestamp);
     event CollateralReturned(uint256 indexed optionId, address indexed to, uint256 amount, uint256 timestamp);
     event OrderHashUsed(bytes32 indexed orderHash, address indexed maker);
+    event OptionExpired(uint256 indexed optionId, address indexed optionHolder);
 
     constructor(address _limitOrderProtocol) 
         ERC721("OnChainCallOption", "OCCO") 
@@ -242,8 +243,8 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         return block.timestamp - collateralTimestamp[optionId];
     }
 
-    /// @notice Settle expired options - always auto-exercise (simple version)
-    function settleExpiredOption(uint256 optionId) external {
+    /// @notice Clean up expired options - return collateral to maker
+    function cleanupExpiredOption(uint256 optionId) public {
         Option storage opt = options[optionId];
         require(optionId < nextOptionId, "Option does not exist");
         require(block.timestamp > opt.expiry, "Option not expired yet");
@@ -253,50 +254,22 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         opt.exercised = true;
         address optionHolder = ownerOf(optionId);
         
-        // Auto-exercise: Option holder pays strike price and receives underlying
+        // Return collateral to maker (option holder gets nothing)
         require(
-            IERC20(opt.strikeAsset).transferFrom(optionHolder, opt.maker, opt.strikePrice),
-            "Strike payment failed"
+            IERC20(opt.underlyingAsset).transfer(opt.maker, opt.amount),
+            "Collateral return failed"
         );
 
-        require(
-            IERC20(opt.underlyingAsset).transfer(optionHolder, opt.amount),
-            "Asset transfer failed"
-        );
-
-        emit CollateralReturned(optionId, optionHolder, opt.amount, block.timestamp);
+        emit CollateralReturned(optionId, opt.maker, opt.amount, block.timestamp);
         _burn(optionId);
-        emit OptionExercised(optionId, optionHolder);
+        emit OptionExpired(optionId, optionHolder);
     }
 
     /// @notice Batch settle multiple expired options
-    function batchSettleExpiredOptions(uint256[] calldata optionIds) external {
+    function batchCleanupExpiredOptions(uint256[] calldata optionIds) external {
         for (uint256 i = 0; i < optionIds.length; i++) {
             uint256 optionId = optionIds[i];
-            Option storage opt = options[optionId];
-            
-            // Skip if already handled
-            if (optionId >= nextOptionId || opt.exercised || block.timestamp <= opt.expiry) {
-                continue;
-            }
-
-            opt.exercised = true;
-            address optionHolder = ownerOf(optionId);
-
-            // Auto-exercise: Option holder pays strike price and receives underlying
-            require(
-                IERC20(opt.strikeAsset).transferFrom(optionHolder, opt.maker, opt.strikePrice),
-                "Strike payment failed"
-            );
-
-            require(
-                IERC20(opt.underlyingAsset).transfer(optionHolder, opt.amount),
-                "Asset transfer failed"
-            );
-
-            emit CollateralReturned(optionId, optionHolder, opt.amount, block.timestamp);
-            _burn(optionId);
-            emit OptionExercised(optionId, optionHolder);
+            cleanupExpiredOption(optionId);
         }
     }
 

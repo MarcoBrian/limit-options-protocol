@@ -25,16 +25,16 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         bool exercised;
     }
 
+    // Updated OPTION_TYPEHASH without nonce - using salt for uniqueness
     bytes32 public constant OPTION_TYPEHASH = keccak256(
-        "Option(address underlyingAsset,address strikeAsset,address maker,uint256 strikePrice,uint256 expiry,uint256 amount,uint256 nonce)"
+        "Option(address underlyingAsset,address strikeAsset,address maker,uint256 strikePrice,uint256 expiry,uint256 amount,uint256 salt)"
     );
 
     uint256 public nextOptionId;
     mapping(uint256 => Option) public options;
     
-    // INDEPENDENT nonce management for OptionsNFT
-    mapping(address => uint256) public optionNonces; // maker => current nonce
-    mapping(address => mapping(uint256 => bool)) public usedOptionNonces; // maker => nonce => used
+    // ORDER HASH-BASED replay protection (replacing nonce system)
+    mapping(bytes32 => bool) public usedOrderHashes; // orderHash => used
     
     // Collateral tracking
     mapping(uint256 => bool) public collateralProvided; // optionId => collateral status
@@ -54,7 +54,7 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
     event DebugInfo(string message, bytes data);
     event CollateralProvided(uint256 indexed optionId, address indexed maker, uint256 amount, uint256 timestamp);
     event CollateralReturned(uint256 indexed optionId, address indexed to, uint256 amount, uint256 timestamp);
-    event OptionNonceUsed(address indexed maker, uint256 nonce);
+    event OrderHashUsed(bytes32 indexed orderHash, address indexed maker);
 
     constructor(address _limitOrderProtocol) 
         ERC721("OnChainCallOption", "OCCO") 
@@ -100,15 +100,15 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         emit TakerInteractionCalled(taker, makingAmount, takingAmount);
         emit DebugInfo("extraData length", abi.encode(extraData.length));
         
-        // FIXED: Decode all parameters from interaction data (not just signature components)
+        // Decode parameters from interaction data (salt replaces nonce)
         (
             address maker,
-            address underlyingAsset,    // ← From signature
-            address strikeAsset,        // ← From signature  
-            uint256 strikePrice,        // ← From signature
-            uint256 expiry,            // ← From signature
-            uint256 amount,            // ← From signature
-            uint256 nonce,             // ← From signature
+            address underlyingAsset,
+            address strikeAsset,
+            uint256 strikePrice,
+            uint256 expiry,
+            uint256 amount,
+            uint256 salt,  // Salt for uniqueness (replaces nonce)
             uint8 v,
             bytes32 r,
             bytes32 s
@@ -120,46 +120,45 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         emit DebugInfo("decoded strikePrice", abi.encode(strikePrice));
         emit DebugInfo("decoded expiry", abi.encode(expiry));
         emit DebugInfo("decoded amount", abi.encode(amount));
-        emit DebugInfo("decoded nonce", abi.encode(nonce));
+        emit DebugInfo("decoded salt", abi.encode(salt));
 
-        // FIXED: Basic validation using actual parameters from signature
+        // Basic validation using actual parameters from signature
         require(maker != address(0), "Invalid maker");
         require(underlyingAsset != address(0), "Invalid underlying asset");
         require(strikeAsset != address(0), "Invalid strike asset");
         require(strikePrice > 0, "Invalid strike price");
         require(amount > 0, "Invalid amount");
         
-        // INDEPENDENT nonce validation for OptionsNFT
-        require(!usedOptionNonces[maker][nonce], "Option nonce already used");
-        require(nonce >= optionNonces[maker], "Nonce too low");
-
-        // FIXED: Verify signature using actual parameters from signature
+        // Create option hash for replay protection using EIP-712 hash
         bytes32 structHash = keccak256(
             abi.encode(
                 OPTION_TYPEHASH,
-                underlyingAsset,  // ← From signature
-                strikeAsset,      // ← From signature
+                underlyingAsset,
+                strikeAsset,
                 maker,
-                strikePrice,      // ← From signature
-                expiry,           // ← From signature
-                amount,           // ← From signature
-                nonce
+                strikePrice,
+                expiry,
+                amount,
+                salt
             )
         );
 
-        emit DebugInfo("structHash", abi.encode(structHash));
-
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash));
-        emit DebugInfo("digest", abi.encode(digest));
+        bytes32 optionHash = keccak256(abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash));
         
-        address recovered = ecrecover(digest, v, r, s);
+        // ORDER HASH-BASED replay protection
+        require(!usedOrderHashes[optionHash], "Option order already used");
+
+        // Verify signature using the same hash
+        emit DebugInfo("structHash", abi.encode(structHash));
+        emit DebugInfo("optionHash", abi.encode(optionHash));
+        
+        address recovered = ecrecover(optionHash, v, r, s);
         emit DebugInfo("recovered address", abi.encode(recovered));
         require(maker == recovered, "Invalid signature");
 
-        // Mark nonce as used and update current nonce
-        usedOptionNonces[maker][nonce] = true;
-        optionNonces[maker] = nonce + 1; // Next nonce should be higher
-        emit OptionNonceUsed(maker, nonce);
+        // Mark order hash as used
+        usedOrderHashes[optionHash] = true;
+        emit OrderHashUsed(optionHash, maker);
 
         // Pull collateral from maker using actual amount from signature
         require(IERC20(underlyingAsset).transferFrom(maker, address(this), amount), "Transfer failed");
@@ -167,12 +166,12 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         // Mint option NFT to taker using actual parameters from signature
         uint256 optionId = nextOptionId++;
         options[optionId] = Option({
-            underlyingAsset: underlyingAsset,  // ← From signature
-            strikeAsset: strikeAsset,          // ← From signature
+            underlyingAsset: underlyingAsset,
+            strikeAsset: strikeAsset,
             maker: maker,
-            strikePrice: strikePrice,          // ← From signature
-            expiry: expiry,                    // ← From signature
-            amount: amount,                    // ← From signature
+            strikePrice: strikePrice,
+            expiry: expiry,
+            amount: amount,
             exercised: false
         });
 
@@ -327,65 +326,81 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         IERC20(token).transfer(owner(), amount);
     }
 
-    /// @notice Get the next available nonce for a maker
-    /// @param maker The maker address
-    /// @return The next available nonce
-    function getNextNonce(address maker) external view returns (uint256) {
-        return optionNonces[maker];
-    }
-
-    /// @notice Get the next available nonce for a maker (gas optimized)
-    /// @param maker The maker address
-    /// @param startNonce The starting nonce to check from
-    /// @return The next available nonce
-    function getNextNonceFrom(address maker, uint256 startNonce) external view returns (uint256) {
-        uint256 nonce = startNonce;
-        while (usedOptionNonces[maker][nonce]) {
-            nonce++;
-            // Prevent infinite loops
-            if (nonce > startNonce + 1000) {
-                revert("Nonce search limit exceeded");
-            }
-        }
-        return nonce;
-    }
-
-    /// @notice Get the current nonce for a maker (last used + 1)
-    /// @param maker The maker address
-    /// @return The current nonce
-    function getCurrentNonce(address maker) external view returns (uint256) {
-        return optionNonces[maker];
-    }
-
-    /// @notice Check if a nonce is available for a maker
-    /// @param maker The maker address
-    /// @param nonce The nonce to check
-    /// @return True if the nonce is available
-    function isNonceAvailable(address maker, uint256 nonce) external view returns (bool) {
-        return !usedOptionNonces[maker][nonce] && nonce >= optionNonces[maker];
-    }
-
-    /// @notice Advance nonce for a maker (for testing/debugging)
-    /// @param maker The maker address
-    /// @param amount The amount to advance by
-    function advanceNonce(address maker, uint256 amount) external {
-        require(msg.sender == maker || msg.sender == owner(), "Not authorized");
-        optionNonces[maker] += amount;
-    }
-
-    // Alternative approach: Track used order hashes instead of nonces
-    mapping(bytes32 => bool) public usedOrderHashes; // orderHash => used
-
-    /// @notice Alternative: Use order hash instead of nonce for replay protection
+    // ORDER HASH-BASED functions (replacing nonce functions)
+    
+    /// @notice Check if an order hash is available (not used)
     /// @param orderHash The hash of the order to check
     /// @return True if the order hash is available
     function isOrderHashAvailable(bytes32 orderHash) external view returns (bool) {
         return !usedOrderHashes[orderHash];
     }
 
-    /// @notice Alternative: Mark order hash as used
+    /// @notice Mark order hash as used (only callable by LOP)
     /// @param orderHash The hash of the order to mark as used
     function markOrderHashUsed(bytes32 orderHash) external onlyLimitOrderProtocol {
         usedOrderHashes[orderHash] = true;
+    }
+
+    /// @notice Generate option hash for given parameters
+    /// @param underlyingAsset The underlying asset address
+    /// @param strikeAsset The strike asset address
+    /// @param maker The maker address
+    /// @param strikePrice The strike price
+    /// @param expiry The expiry timestamp
+    /// @param amount The option amount
+    /// @param salt The salt for uniqueness
+    /// @return The option hash
+    function generateOptionHash(
+        address underlyingAsset,
+        address strikeAsset,
+        address maker,
+        uint256 strikePrice,
+        uint256 expiry,
+        uint256 amount,
+        uint256 salt
+    ) external view returns (bytes32) {
+        bytes32 structHash = keccak256(
+            abi.encode(
+                OPTION_TYPEHASH,
+                underlyingAsset,
+                strikeAsset,
+                maker,
+                strikePrice,
+                expiry,
+                amount,
+                salt
+            )
+        );
+        return keccak256(abi.encodePacked("\x19\x01", _domainSeparatorV4(), structHash));
+    }
+
+    /// @notice Check if option parameters would create a valid unused hash
+    /// @param underlyingAsset The underlying asset address
+    /// @param strikeAsset The strike asset address
+    /// @param maker The maker address
+    /// @param strikePrice The strike price
+    /// @param expiry The expiry timestamp
+    /// @param amount The option amount
+    /// @param salt The salt for uniqueness
+    /// @return True if the parameters would create an unused hash
+    function isOptionHashAvailable(
+        address underlyingAsset,
+        address strikeAsset,
+        address maker,
+        uint256 strikePrice,
+        uint256 expiry,
+        uint256 amount,
+        uint256 salt
+    ) external view returns (bool) {
+        bytes32 optionHash = this.generateOptionHash(
+            underlyingAsset,
+            strikeAsset,
+            maker,
+            strikePrice,
+            expiry,
+            amount,
+            salt
+        );
+        return !usedOrderHashes[optionHash];
     }
 } 

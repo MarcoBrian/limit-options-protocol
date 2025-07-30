@@ -6,31 +6,14 @@ function toAddressType(addr) {
   return "0x" + addr.padStart(64, "0");
 }
 
-// Helper to set maker traits flags
-function setMakerTraits(flags = {}) {
+// Helper to set maker traits flags similar to SDK pattern
+function setMakerTraits(flags = {}, nonce = 0) {
   let traits = 0n;
   
-  // Encode nonce in bits [120-159] (40 bits)
-  if (flags.nonce !== undefined) {
-    traits |= (BigInt(flags.nonce) << 120n);
-  }
+  // CRITICAL FIX: Set nonce in bits [120..159] (40 bits)
+  const nonceValue = BigInt(nonce) & ((1n << 40n) - 1n); // Ensure nonce fits in 40 bits
+  traits |= (nonceValue << 120n);
   
-  // Encode expiry in bits [80-119] (40 bits)
-  if (flags.expiry !== undefined) {
-    traits |= (BigInt(flags.expiry) << 80n);
-  }
-  
-  // Encode allowed sender in bits [0-79] (80 bits)
-  if (flags.allowedSender && flags.allowedSender !== "0x0000000000000000000000000000000000000000") {
-    traits |= (BigInt(flags.allowedSender) & ((1n << 80n) - 1n));
-  }
-  
-  // Encode series in bits [160-199] (40 bits)
-  if (flags.series !== undefined) {
-    traits |= (BigInt(flags.series) << 160n);
-  }
-  
-  // Set flags (high bits)
   if (flags.postInteraction) {
     traits |= (1n << 251n); // POST_INTERACTION_CALL_FLAG
   }
@@ -62,6 +45,37 @@ function buildTakerTraits(interactionLength = 0) {
 }
 
 /**
+ * Calculate taker traits from interaction data
+ * @param {string|Uint8Array} interactionData - The interaction data
+ * @returns {bigint} Taker traits value
+ */
+function calculateTakerTraits(interactionData) {
+  const length = typeof interactionData === 'string' 
+    ? interactionData.length / 2 - 1  // Hex string
+    : interactionData.length - 1;     // Uint8Array
+  return buildTakerTraits(length);
+}
+
+/**
+ * Prepare order for filling - returns the correct parameters for fillOrderArgs
+ * @param {Object} orderData - Complete order data from buildCompleteCallOption
+ * @param {string|number} fillAmount - Amount to fill
+ * @returns {Object} Parameters ready for fillOrderArgs
+ */
+function prepareOrderForFilling(orderData, fillAmount) {
+  const takerTraits = calculateTakerTraits(orderData.interaction.data);
+  
+  return {
+    orderTuple: orderData.orderTuple,
+    r: orderData.lopSignature.r,
+    vs: orderData.lopSignature.vs,
+    fillAmount: ethers.getBigInt(fillAmount),
+    takerTraits: takerTraits,
+    interactionData: orderData.interaction.data
+  };
+}
+
+/**
  * Build a standard LOP order
  * @param {Object} params - Order parameters
  * @param {string} params.maker - Maker address
@@ -76,25 +90,28 @@ function buildTakerTraits(interactionLength = 0) {
 function buildOrder(params) {
   const {
     maker,
+    receiver = maker,
     makerAsset,
     takerAsset,
     makingAmount,
     takingAmount,
-    receiver = maker,
-    makerTraits = {}
+    makerTraits = {},
+    lopNonce = 0,  // CRITICAL FIX: Accept lopNonce parameter
+    customMakerTraits = null  // NEW: Accept pre-built MakerTraits (e.g., from SDK)
   } = params;
 
-  const salt = ethers.getBigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
-  
+  const salt = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
+
   const order = {
-    salt,
+    salt: ethers.getBigInt(salt),
     maker: toAddressType(maker),
     receiver: toAddressType(receiver),
     makerAsset: toAddressType(makerAsset),
     takerAsset: toAddressType(takerAsset),
     makingAmount: ethers.getBigInt(makingAmount),
     takingAmount: ethers.getBigInt(takingAmount),
-    makerTraits: setMakerTraits(makerTraits)
+    // Use custom MakerTraits if provided, otherwise build from flags
+    makerTraits: customMakerTraits !== null ? customMakerTraits : setMakerTraits(makerTraits, lopNonce)
   };
 
   const orderTuple = [
@@ -198,29 +215,29 @@ function buildCallOptionOrder(params) {
     optionAmount,
     premium,
     expiry,
+    lopNonce,
     makerTraits = {},
-    lopNonce
+    customMakerTraits = null  // NEW: Accept pre-built MakerTraits
   } = params;
 
-  // Generate LOP nonce if not provided
-  const finalLopNonce = lopNonce !== undefined ? lopNonce : getNextLopNonce(maker);
+  // Default maker traits with no partial fills
+  const defaultMakerTraits = {
+    noPartialFills: true,
+    ...makerTraits
+  };
 
-  // For call options with dummy token approach:
-  // - Maker offers dummy tokens (placeholder, gets transferred to taker)
-  // - Taker pays premium (USDC)
-  // - Real ETH collateral handled by OptionsNFT contract
-  // - NFT gets minted via takerInteraction
+  // Auto-generate LOP nonce if not provided
+  const finalLopNonce = lopNonce !== undefined ? lopNonce : Math.floor(Math.random() * 1000000);
+
   const order = buildOrder({
     maker,
-    makerAsset: dummyTokenAddress,    // ✅ Use dummy token as maker asset
-    takerAsset: strikeAsset,          // USDC
-    makingAmount: optionAmount,       // ✅ Amount of dummy tokens to transfer
-    takingAmount: premium,            // Taker pays premium
-    receiver: maker,                  // Maker receives premium
-    makerTraits: {
-      ...makerTraits,
-      nonce: finalLopNonce  // Set LOP nonce for bit invalidator
-    }
+    makerAsset: dummyTokenAddress, // Use dummy token as placeholder
+    takerAsset: strikeAsset,       // Taker pays premium in strike asset
+    makingAmount: optionAmount,    // Maker "offers" option amount (dummy tokens)
+    takingAmount: premium,         // Taker pays premium
+    makerTraits: defaultMakerTraits,
+    lopNonce: finalLopNonce,        // CRITICAL FIX: Pass the nonce
+    customMakerTraits: customMakerTraits  // NEW: Pass custom traits
   });
 
   return {
@@ -239,27 +256,16 @@ function buildCallOptionOrder(params) {
 }
 
 /**
- * Sign an OptionsNFT order
+ * Sign an OptionsNFT order using salt-based system (no nonce)
  * @param {Object} optionParams - Option parameters
  * @param {Object} signer - Signer object (not address)
  * @param {string} optionsNFTAddress - OptionsNFT contract address
- * @param {number} nonce - Nonce for the signature
+ * @param {number} salt - Salt for uniqueness (replaces nonce)
  * @returns {Object} Signature components
  */
-async function signOptionsNFT(optionParams, signer, optionsNFTAddress, nonce = 1) {
-  // Calculate domain separator manually
-  const optionsNFTDomainSeparator = ethers.keccak256(
-    ethers.AbiCoder.defaultAbiCoder().encode(
-      ["bytes32", "bytes32", "bytes32", "uint256", "address"],
-      [
-        ethers.keccak256(ethers.toUtf8Bytes("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")),
-        ethers.keccak256(ethers.toUtf8Bytes("OptionNFT")),
-        ethers.keccak256(ethers.toUtf8Bytes("1")),
-        await ethers.provider.getNetwork().then(n => n.chainId),
-        optionsNFTAddress
-      ]
-    )
-  );
+async function signOptionsNFT(optionParams, signer, optionsNFTAddress, salt = null) {
+  // Generate random salt if not provided
+  const finalSalt = salt !== null ? salt : Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
 
   const domain = {
     name: "OptionNFT",
@@ -276,7 +282,7 @@ async function signOptionsNFT(optionParams, signer, optionsNFTAddress, nonce = 1
       { name: "strikePrice", type: "uint256" },
       { name: "expiry", type: "uint256" },
       { name: "amount", type: "uint256" },
-      { name: "nonce", type: "uint256" }
+      { name: "salt", type: "uint256" }  // Changed from nonce to salt
     ]
   };
 
@@ -287,13 +293,13 @@ async function signOptionsNFT(optionParams, signer, optionsNFTAddress, nonce = 1
     strikePrice: optionParams.strikePrice,
     expiry: optionParams.expiry,
     amount: optionParams.optionAmount,
-    nonce: BigInt(nonce)
+    salt: BigInt(finalSalt)  // Using salt instead of nonce
   };
 
   const signature = await signer.signTypedData(domain, types, value);
   const { r, s, v } = ethers.Signature.from(signature);
 
-  return { signature, r, s, v, nonce };
+  return { signature, r, s, v, salt: finalSalt };
 }
 
 /**
@@ -308,19 +314,9 @@ async function signOptionsNFT(optionParams, signer, optionsNFTAddress, nonce = 1
 function buildOptionsNFTInteraction(params) {
   const { maker, optionParams, signature, optionsNFTAddress } = params;
 
+  // Encode interaction data: maker, optionParams, signature components
   const interactionData = ethers.AbiCoder.defaultAbiCoder().encode(
-    [
-      "address",    // maker
-      "address",    // underlyingAsset
-      "address",    // strikeAsset
-      "uint256",    // strikePrice
-      "uint256",    // expiry
-      "uint256",    // amount
-      "uint256",    // nonce
-      "uint8",      // v
-      "bytes32",    // r
-      "bytes32"     // s
-    ],
+    ["address", "address", "address", "uint256", "uint256", "uint256", "uint256", "uint8", "bytes32", "bytes32"],
     [
       maker,
       optionParams.underlyingAsset,
@@ -328,80 +324,51 @@ function buildOptionsNFTInteraction(params) {
       optionParams.strikePrice,
       optionParams.expiry,
       optionParams.optionAmount,
-      signature.nonce,
+      signature.salt,  // Using salt instead of nonce
       signature.v,
       signature.r,
       signature.s
     ]
   );
 
+  // Prepend contract address (20 bytes) to interaction data
   const fullInteractionData = ethers.concat([
-    ethers.zeroPadValue(optionsNFTAddress, 20),
+    optionsNFTAddress,
     interactionData
   ]);
 
-  const interactionLength = BigInt(fullInteractionData.length / 2 - 1);
-  const takerTraits = buildTakerTraits(interactionLength);
-
   return {
-    interactionData,
-    fullInteractionData,
-    takerTraits,
-    interactionLength
+    data: fullInteractionData,
+    length: fullInteractionData.length,
+    contractAddress: optionsNFTAddress,
+    decodedData: {
+      maker,
+      underlyingAsset: optionParams.underlyingAsset,
+      strikeAsset: optionParams.strikeAsset,
+      strikePrice: optionParams.strikePrice,
+      expiry: optionParams.expiry,
+      amount: optionParams.optionAmount,
+      salt: signature.salt,  // Using salt instead of nonce
+      v: signature.v,
+      r: signature.r,
+      s: signature.s
+    }
   };
 }
 
-/**
- * Get the next available nonce for a maker from OptionsNFT
- * @param {string} makerAddress - Maker address
- * @param {string} optionsNFTAddress - OptionsNFT contract address
- * @returns {Promise<number>} Next available nonce
- */
-async function getNextNonceFromOptionsNFT(makerAddress, optionsNFTAddress) {
-  const optionsNFT = await ethers.getContractAt("OptionNFT", optionsNFTAddress);
-  const nonce = await optionsNFT.getNextNonce(makerAddress);
-  return Number(nonce);
-}
-
-/**
- * Check if nonce is available for a maker in OptionsNFT
- * @param {string} makerAddress - Maker address
- * @param {string} optionsNFTAddress - OptionsNFT contract address
- * @param {number} nonce - Nonce to check
- * @returns {Promise<boolean>} True if nonce is available
- */
-async function isNonceAvailableInOptionsNFT(makerAddress, optionsNFTAddress, nonce) {
-  const optionsNFT = await ethers.getContractAt("OptionNFT", optionsNFTAddress);
-  const isAvailable = await optionsNFT.isNonceAvailable(makerAddress, nonce);
-  return isAvailable;
-}
-
-/**
- * Advance nonce for a maker in OptionsNFT (for testing/debugging)
- * @param {Object} signer - Signer object
- * @param {string} optionsNFTAddress - OptionsNFT contract address
- * @param {number} amount - Amount to advance (default: 1)
- * @returns {Promise<Object>} Transaction result
- */
-async function advanceNonceInOptionsNFT(signer, optionsNFTAddress, amount = 1) {
-  const optionsNFT = await ethers.getContractAt("OptionNFT", optionsNFTAddress);
-  const tx = await optionsNFT.connect(signer).advanceNonce(signer.address, amount);
-  return tx;
-}
-
-// LOP nonce tracking per maker
+// LOP nonce tracker for testing (can be removed in production)
 const lopNonceTracker = new Map();
 
 /**
- * Get the next available LOP nonce for a maker
+ * Get next LOP nonce for a maker (for testing)
  * @param {string} makerAddress - Maker address
- * @returns {number} Next available LOP nonce
+ * @returns {number} Next LOP nonce
  */
 function getNextLopNonce(makerAddress) {
-  const currentNonce = lopNonceTracker.get(makerAddress) || 0;
-  const nextNonce = currentNonce + 1;
-  lopNonceTracker.set(makerAddress, nextNonce);
-  return nextNonce;
+  const current = lopNonceTracker.get(makerAddress) || 0;
+  const next = current + 1;
+  lopNonceTracker.set(makerAddress, next);
+  return next;
 }
 
 /**
@@ -414,7 +381,57 @@ function resetLopNonce(makerAddress, nonce = 0) {
 }
 
 /**
- * Complete call option order builder with automatic nonce management
+ * Generate a unique salt for option signatures
+ * @param {string} maker - Maker address
+ * @param {Object} optionParams - Option parameters
+ * @returns {number} Unique salt
+ */
+function generateUniqueSalt(maker, optionParams) {
+  // Create a hash of the maker and option parameters plus timestamp for uniqueness
+  const data = ethers.AbiCoder.defaultAbiCoder().encode(
+    ["address", "address", "address", "uint256", "uint256", "uint256", "uint256", "uint256"],
+    [
+      maker,
+      optionParams.underlyingAsset,
+      optionParams.strikeAsset,
+      optionParams.strikePrice,
+      optionParams.expiry,
+      optionParams.optionAmount,
+      Date.now(),
+      Math.floor(Math.random() * 1000000)  // Smaller random number to avoid overflow
+    ]
+  );
+  
+  const hash = ethers.keccak256(data);
+  // Use a simple approach: take first 8 hex chars and convert to number
+  // This gives us a number in range 0 to 4,294,967,295 (32-bit)
+  const saltHex = hash.slice(2, 10); // Take first 8 hex characters
+  return parseInt(saltHex, 16);
+}
+
+/**
+ * Check if an option hash is available (not used)
+ * @param {string} optionsNFTAddress - OptionsNFT contract address
+ * @param {Object} optionParams - Option parameters
+ * @param {string} maker - Maker address
+ * @param {number} salt - Salt for uniqueness
+ * @returns {Promise<boolean>} True if hash is available
+ */
+async function isOptionHashAvailable(optionsNFTAddress, optionParams, maker, salt) {
+  const optionsNFT = await ethers.getContractAt("OptionNFT", optionsNFTAddress);
+  return await optionsNFT.isOptionHashAvailable(
+    optionParams.underlyingAsset,
+    optionParams.strikeAsset,
+    maker,
+    optionParams.strikePrice,
+    optionParams.expiry,
+    optionParams.optionAmount,
+    salt
+  );
+}
+
+/**
+ * Complete call option order builder with automatic salt generation
  * @param {Object} params - Complete call option parameters
  * @param {Object} params.makerSigner - Maker signer object
  * @param {string} params.underlyingAsset - Underlying asset address
@@ -426,7 +443,7 @@ function resetLopNonce(makerAddress, nonce = 0) {
  * @param {number} params.expiry - Expiry timestamp
  * @param {string} params.lopAddress - LOP contract address
  * @param {string} params.optionsNFTAddress - OptionsNFT contract address
- * @param {number} params.nonce - Nonce for signature (optional, will auto-fetch if not provided)
+ * @param {number} params.salt - Salt for signature (optional, will auto-generate if not provided)
  * @param {number} params.lopNonce - LOP nonce for bit invalidator (optional, will auto-generate if not provided)
  * @returns {Object} Complete order with signatures
  */
@@ -442,15 +459,22 @@ async function buildCompleteCallOption(params) {
     expiry,
     lopAddress,
     optionsNFTAddress,
-    nonce,
-    lopNonce
+    salt,
+    lopNonce,
+    customMakerTraits = null  // NEW: Accept pre-built MakerTraits from SDK
   } = params;
 
-  // Auto-fetch nonce if not provided
-  let finalNonce = nonce;
-  if (finalNonce === undefined) {
-    finalNonce = await getNextNonceFromOptionsNFT(makerSigner.address, optionsNFTAddress);
-    console.log(`🔢 Auto-fetched nonce: ${finalNonce} for maker ${makerSigner.address}`);
+  // Auto-generate salt if not provided
+  let finalSalt = salt;
+  if (finalSalt === undefined) {
+    finalSalt = generateUniqueSalt(makerSigner.address, {
+      underlyingAsset,
+      strikeAsset,
+      strikePrice: ethers.getBigInt(strikePrice),
+      expiry: BigInt(expiry),
+      optionAmount: ethers.getBigInt(optionAmount)
+    });
+    console.log(`🔢 Auto-generated salt: ${finalSalt} for maker ${makerSigner.address}`);
   }
 
   // 1. Build the LOP order
@@ -463,7 +487,8 @@ async function buildCompleteCallOption(params) {
     optionAmount,
     premium,
     expiry,
-    lopNonce
+    lopNonce,
+    customMakerTraits: customMakerTraits  // NEW: Pass custom traits
   });
 
   // 2. Sign the LOP order
@@ -474,7 +499,7 @@ async function buildCompleteCallOption(params) {
     orderResult.optionParams,
     makerSigner,
     optionsNFTAddress,
-    finalNonce
+    finalSalt
   );
 
   // 4. Build interaction data
@@ -488,11 +513,12 @@ async function buildCompleteCallOption(params) {
   return {
     order: orderResult.order,
     orderTuple: orderResult.orderTuple,
+    originalAddresses: orderResult.originalAddresses,  // Add this line
     optionParams: orderResult.optionParams,
     lopSignature,
     optionsNFTSignature,
     interaction,
-    nonce: finalNonce,
+    salt: finalSalt,  // Return salt instead of nonce
     lopNonce: orderResult.lopNonce
   };
 }
@@ -508,95 +534,94 @@ async function buildCompleteCallOption(params) {
  */
 async function fillCallOption(params) {
   const { orderData, takerSigner, fillAmount, lopAddress } = params;
-  
+
   const lop = await ethers.getContractAt("LimitOrderProtocol", lopAddress);
-  
+
   const tx = await lop.connect(takerSigner).fillOrderArgs(
     orderData.orderTuple,
     orderData.lopSignature.r,
     orderData.lopSignature.vs,
     ethers.getBigInt(fillAmount),
-    orderData.interaction.takerTraits,
-    orderData.interaction.fullInteractionData
+    buildTakerTraits(orderData.interaction.length),
+    orderData.interaction.data
   );
 
-  return tx;
+  return await tx.wait();
 }
 
-/**
- * Deploy and setup a dummy option token
- * @param {string} deployer - Deployer address
- * @returns {Object} Dummy token contract and address
- */
-async function deployDummyOptionToken(deployer) {
+// Dummy token management functions
+async function deployDummyOptionToken(deployer = null) {
   const DummyOptionToken = await ethers.getContractFactory("DummyOptionToken");
   const dummyToken = await DummyOptionToken.deploy();
   await dummyToken.waitForDeployment();
   
-  return {
-    contract: dummyToken,
-    address: dummyToken.target
-  };
+  // For backward compatibility, return both contract and address
+  if (deployer !== null) {
+    return {
+      contract: dummyToken,
+      address: dummyToken.target
+    };
+  }
+  
+  return dummyToken;
 }
 
-/**
- * Setup dummy tokens for an option maker
- * @param {Object} params - Setup parameters
- * @param {string} params.dummyTokenAddress - Dummy token contract address
- * @param {string} params.maker - Maker address
- * @param {string} params.lopAddress - LOP contract address
- * @param {string|number} params.optionAmount - Amount of dummy tokens needed
- * @returns {Promise} Setup completion
- */
 async function setupDummyTokensForMaker(params) {
   const { dummyTokenAddress, maker, lopAddress, optionAmount } = params;
   
   const dummyToken = await ethers.getContractAt("DummyOptionToken", dummyTokenAddress);
-  const [deployer, makerSigner] = await ethers.getSigners();
+  const makerSigner = await ethers.getSigner(maker);
   
-  // Mint dummy tokens to maker (called by deployer/owner)
-  await dummyToken.mint(maker, ethers.getBigInt(optionAmount));
+  // Mint dummy tokens to maker
+  await dummyToken.mint(maker, optionAmount);
   
-  // Approve LOP to spend dummy tokens (called by maker)
-  await dummyToken.connect(makerSigner).approve(lopAddress, ethers.getBigInt(optionAmount));
+  // Get current allowance and add the new optionAmount to it
+  const currentAllowance = await dummyToken.allowance(maker, lopAddress);
+  const newAllowance = currentAllowance + optionAmount;
+  
+  // Approve LOP to spend the increased amount of dummy tokens
+  await dummyToken.connect(makerSigner).approve(lopAddress, newAllowance);
   
   console.log(`✅ Setup ${ethers.formatEther(optionAmount)} dummy tokens for maker ${maker}`);
+  console.log(`   Total allowance now: ${ethers.formatEther(newAllowance)}`);
 }
 
-/**
- * Cleanup dummy tokens received by taker (burn them since they have no value)
- * @param {string} dummyTokenAddress - Dummy token contract address
- * @param {string} taker - Taker address
- * @returns {Promise} Cleanup completion
- */
-async function cleanupDummyTokens(dummyTokenAddress, taker) {
+async function cleanupDummyTokens(dummyTokenAddress, holder) {
   const dummyToken = await ethers.getContractAt("DummyOptionToken", dummyTokenAddress);
-  const [deployer, maker, takerSigner] = await ethers.getSigners();
+  const holderSigner = await ethers.getSigner(holder);
   
-  const balance = await dummyToken.balanceOf(taker);
+  const balance = await dummyToken.balanceOf(holder);
   if (balance > 0) {
-    await dummyToken.connect(takerSigner).burn(balance);
-    console.log(`🔥 Burned ${ethers.formatEther(balance)} dummy tokens for taker ${taker}`);
+    await dummyToken.connect(holderSigner).burn(balance);
+    console.log(`🔥 Burned ${ethers.formatEther(balance)} dummy tokens for ${holder}`);
   }
 }
 
 module.exports = {
-  toAddressType,
-  setMakerTraits,
-  buildTakerTraits,
+  // Core functions
   buildOrder,
   signOrder,
   buildCallOptionOrder,
   signOptionsNFT,
   buildOptionsNFTInteraction,
+  
+  // High-level functions
   buildCompleteCallOption,
   fillCallOption,
+  
+  // Utility functions
+  toAddressType,
+  setMakerTraits,
+  buildTakerTraits,
+  calculateTakerTraits,  // NEW: Helper to calculate taker traits
+  prepareOrderForFilling,  // NEW: Prepare order for filling
+  getNextLopNonce,
+  resetLopNonce,
+  generateUniqueSalt,
+  isOptionHashAvailable,
+  
+  // Dummy token functions
   deployDummyOptionToken,
   setupDummyTokensForMaker,
-  cleanupDummyTokens,
-  getNextNonceFromOptionsNFT,
-  isNonceAvailableInOptionsNFT,
-  advanceNonceInOptionsNFT,
-  getNextLopNonce,
-  resetLopNonce
+  cleanupDummyTokens
 }; 

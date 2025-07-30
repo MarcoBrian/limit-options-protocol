@@ -4,10 +4,9 @@ const {
   fillCallOption,
   deployDummyOptionToken,
   setupDummyTokensForMaker,
-  cleanupDummyTokens,
-  getNextNonce
+  cleanupDummyTokens
 } = require("./helpers/orderBuilder");
-const { createNonceManager } = require("./helpers/nonceManager");
+const { createOrderHashManager } = require("./helpers/nonceManager");
 
 async function main() {
   console.log("🚀 Testing ETH Call Option with OrderBuilder (Dummy Token Approach)");
@@ -94,25 +93,19 @@ async function main() {
     optionAmount
   });
 
-  // Demonstrate nonce management
-  console.log("\n🔢 Testing nonce management...");
-  const nonceManager = createNonceManager(optionsNFT.target);
+  // Demonstrate order hash management
+  console.log("\n🔢 Testing order hash management...");
+  const orderHashManager = createOrderHashManager(optionsNFT.target);
   
-  // Get nonce info for maker
-  const nonceInfo = await nonceManager.getNonceInfo(maker.address);
-  console.log("Nonce Information:");
-  console.log(`- Maker: ${nonceInfo.maker}`);
-  console.log(`- Next Nonce: ${nonceInfo.nextNonce}`);
-  console.log(`- Current Nonce: ${nonceInfo.currentNonce}`);
-  console.log(`- Is Available: ${nonceInfo.isAvailable}`);
-  
-  // Validate nonce
-  const isValidNonce = await nonceManager.validateNonce(maker.address, nonceInfo.nextNonce);
-  console.log(`- Nonce ${nonceInfo.nextNonce} is valid: ${isValidNonce}`);
-  
-  // Get recommended nonce
-  const recommendedNonce = await nonceManager.getRecommendedNonce(maker.address);
-  console.log(`- Recommended nonce: ${recommendedNonce}`);
+  // Generate a sample salt
+  const sampleSalt = orderHashManager.generateUniqueSalt(maker.address, {
+    underlyingAsset: mockETH.target,
+    strikeAsset: mockUSDC.target,
+    strikePrice: strikePrice,
+    expiry: expiry,
+    optionAmount: optionAmount
+  });
+  console.log(`Generated sample salt: ${sampleSalt}`);
 
   // Build complete call option using orderBuilder
   console.log("\n📝 Building complete call option order...");
@@ -127,7 +120,7 @@ async function main() {
     expiry,
     lopAddress: lop.target,
     optionsNFTAddress: optionsNFT.target,
-    nonce: 1
+    salt: 1  // Changed from nonce to salt
   });
 
   console.log("Call Option Order parameters:");

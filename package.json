@@ -16,7 +16,8 @@
     "dev": "nodemon backend/server.js",
     "test:relayer": "node backend/test/test-relayer.js",
     "frontend": "cd frontend && npm start",
-    "dev:full": "concurrently \"npm run dev\" \"npm run frontend\""
+    "dev:full": "concurrently \"npm run dev\" \"npm run frontend\"",
+    "setup:frontend-env": "node scripts/setup-frontend-env.js"
   },
   "keywords": [],
   "author": "",

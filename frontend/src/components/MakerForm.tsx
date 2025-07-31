@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import { useWallet } from '../contexts/WalletContext';
 import { useApp } from '../contexts/AppContext';
-import { OrderSubmission, Order, OrderSignature, OptionParams } from '../types';
+import { OrderSubmission } from '../types';
 import { buildCompleteCallOption } from '../utils/orderBuilder';
+import AssetSelector from './AssetSelector';
+import { validateAssetPair } from '../config/assets';
+import { getContractAddresses, validateContractAddresses } from '../config/contracts';
 
 const MakerForm: React.FC = () => {
-  const { account, isConnected, signer } = useWallet(); // Get signer from context
+  const { isConnected, signer } = useWallet();
   const { submitOrder, loading, error } = useApp();
   
   const [formData, setFormData] = useState({
@@ -17,12 +20,62 @@ const MakerForm: React.FC = () => {
     expiry: '',
   });
 
+  const [validationError, setValidationError] = useState<string>('');
+
+  // Get contract addresses
+  const contractAddresses = getContractAddresses();
+
+  const handleAssetChange = (field: 'underlyingAsset' | 'strikeAsset', address: string) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: address
+    }));
+    
+    // Clear validation error when user changes selection
+    setValidationError('');
+  };
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
       [name]: value
     }));
+  };
+
+  const validateForm = (): boolean => {
+    // Check if contract addresses are valid
+    if (!validateContractAddresses(contractAddresses)) {
+      setValidationError('Contract addresses not configured. Please run the deployment script first.');
+      return false;
+    }
+
+    // Check if assets are selected
+    if (!formData.underlyingAsset || !formData.strikeAsset) {
+      setValidationError('Please select both underlying and strike assets');
+      return false;
+    }
+
+    // Check if assets are different
+    if (!validateAssetPair(formData.underlyingAsset, formData.strikeAsset)) {
+      setValidationError('Underlying asset and strike asset must be different');
+      return false;
+    }
+
+    // Check if other required fields are filled
+    if (!formData.strikePrice || !formData.optionAmount || !formData.premium || !formData.expiry) {
+      setValidationError('Please fill in all required fields');
+      return false;
+    }
+
+    // Check if values are positive
+    if (Number(formData.strikePrice) <= 0 || Number(formData.optionAmount) <= 0 || Number(formData.premium) <= 0) {
+      setValidationError('All numeric values must be greater than 0');
+      return false;
+    }
+
+    setValidationError('');
+    return true;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -33,24 +86,23 @@ const MakerForm: React.FC = () => {
       return;
     }
 
+    if (!validateForm()) {
+      return;
+    }
+
     try {
-      // Get contract addresses (you'll need to get these from deployment)
-      const lopAddress = '0x...'; // Get from .env or deployment
-      const optionsNFTAddress = '0x...'; // Get from .env or deployment
-      const dummyTokenAddress = '0x...'; // Get from .env or deployment
-      
       // Build complete order with proper signatures using signer
       const orderData = await buildCompleteCallOption({
-        makerSigner: signer, // Use the signer from context
+        makerSigner: signer,
         underlyingAsset: formData.underlyingAsset,
         strikeAsset: formData.strikeAsset,
-        dummyTokenAddress,
+        dummyTokenAddress: contractAddresses.dummyTokenAddress,
         strikePrice: formData.strikePrice,
         optionAmount: formData.optionAmount,
         premium: formData.premium,
         expiry: Math.floor(new Date(formData.expiry).getTime() / 1000),
-        lopAddress,
-        optionsNFTAddress
+        lopAddress: contractAddresses.lopAddress,
+        optionsNFTAddress: contractAddresses.optionsNFTAddress
       });
 
       // Convert to OrderSubmission format
@@ -70,7 +122,7 @@ const MakerForm: React.FC = () => {
           s: orderData.lopSignature.s,
           v: orderData.lopSignature.v,
         },
-        lopAddress,
+        lopAddress: contractAddresses.lopAddress,
         optionParams: {
           underlyingAsset: orderData.optionParams.underlyingAsset,
           strikeAsset: orderData.optionParams.strikeAsset,
@@ -85,7 +137,7 @@ const MakerForm: React.FC = () => {
           s: orderData.optionsNFTSignature.s,
           v: orderData.optionsNFTSignature.v,
         },
-        optionsNFTAddress,
+        optionsNFTAddress: contractAddresses.optionsNFTAddress,
       };
 
       await submitOrder(orderSubmission);
@@ -100,6 +152,7 @@ const MakerForm: React.FC = () => {
         premium: '',
         expiry: '',
       });
+      setValidationError('');
     } catch (err: any) {
       console.error('Error submitting order:', err);
       alert(`Error submitting order: ${err.message}`);
@@ -122,60 +175,44 @@ const MakerForm: React.FC = () => {
         </div>
       )}
 
+      {validationError && (
+        <div className="bg-error/10 border border-error text-error px-4 py-3 rounded-lg mb-6">
+          {validationError}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <label htmlFor="underlyingAsset" className="form-label">
-              Underlying Asset Address
-            </label>
-            <input
-              type="text"
-              id="underlyingAsset"
-              name="underlyingAsset"
+            <AssetSelector
+              label="Underlying Asset"
               value={formData.underlyingAsset}
-              onChange={handleInputChange}
-              className="input-field"
-              placeholder="0x..."
+              onChange={(address) => handleAssetChange('underlyingAsset', address)}
+              placeholder="Select underlying asset..."
+              disabled={!isConnected}
               required
+              assetType="underlying"
             />
           </div>
 
           <div>
-            <label htmlFor="strikeAsset" className="form-label">
-              Strike Asset Address
-            </label>
-            <input
-              type="text"
-              id="strikeAsset"
-              name="strikeAsset"
+            <AssetSelector
+              label="Strike Asset"
               value={formData.strikeAsset}
-              onChange={handleInputChange}
-              className="input-field"
-              placeholder="0x..."
+              onChange={(address) => handleAssetChange('strikeAsset', address)}
+              placeholder="Select strike asset..."
+              disabled={!isConnected}
+              excludeAsset={formData.underlyingAsset} // Exclude underlying asset from strike options
               required
-              min={0}
+              assetType="strike"
             />
           </div>
 
-          <div>
-            <label htmlFor="strikePrice" className="form-label">
-              Strike Price (in wei)
-            </label>
-            <input
-              type="number"
-              id="strikePrice"
-              name="strikePrice"
-              value={formData.strikePrice}
-              onChange={handleInputChange}
-              className="input-field"
-              placeholder="2000000000"
-              required
-            />
-          </div>
+          
 
           <div>
             <label htmlFor="optionAmount" className="form-label">
-              Option Amount (in wei)
+              Option Amount 
             </label>
             <input
               type="number"
@@ -184,14 +221,34 @@ const MakerForm: React.FC = () => {
               value={formData.optionAmount}
               onChange={handleInputChange}
               className="input-field"
-              placeholder="1000000000000000000"
+              placeholder="1"
               required
+              min="1"
+              step="1"
+            />
+          </div>
+
+          <div>
+            <label htmlFor="strikePrice" className="form-label">
+              Strike Price ($)
+            </label>
+            <input
+              type="number"
+              id="strikePrice"
+              name="strikePrice"
+              value={formData.strikePrice}
+              onChange={handleInputChange}
+              className="input-field"
+              placeholder="$3000"
+              required
+              min="1"
+              step="1"
             />
           </div>
 
           <div>
             <label htmlFor="premium" className="form-label">
-              Premium (in wei)
+              Premium ($)
             </label>
             <input
               type="number"
@@ -200,8 +257,10 @@ const MakerForm: React.FC = () => {
               value={formData.premium}
               onChange={handleInputChange}
               className="input-field"
-              placeholder="100000000"
+              placeholder="100"
               required
+              min="0"
+              step="1"
             />
           </div>
 
@@ -210,7 +269,7 @@ const MakerForm: React.FC = () => {
               Expiry Date
             </label>
             <input
-              type="datetime-local"
+              type="date"
               id="expiry"
               name="expiry"
               value={formData.expiry}

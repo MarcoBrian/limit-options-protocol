@@ -12,32 +12,32 @@ function toAddressType(addr: string): string {
 
 // Helper to set maker traits flags
 function setMakerTraits(flags: any = {}, nonce: number = 0): bigint {
-  let traits = 0n;
+  let traits = BigInt(0);
   
   // Set nonce in bits [120..159] (40 bits)
-  const nonceValue = BigInt(nonce) & ((1n << 40n) - 1n);
-  traits |= (nonceValue << 120n);
+  const nonceValue = BigInt(nonce) & (BigInt(1) << BigInt(40) - BigInt(1));
+  traits |= (nonceValue << BigInt(120));
   
   if (flags.postInteraction) {
-    traits |= (1n << 251n);
+    traits |= (BigInt(1) << BigInt(251));
   }
   if (flags.noPartialFills) {
-    traits |= (1n << 255n);
+    traits |= (BigInt(1) << BigInt(255));
   }
   if (flags.allowMultipleFills) {
-    traits |= (1n << 254n);
+    traits |= (BigInt(1) << BigInt(254));
   }
   if (flags.preInteraction) {
-    traits |= (1n << 252n);
+    traits |= (BigInt(1) << BigInt(252));
   }
   if (flags.hasExtension) {
-    traits |= (1n << 249n);
+    traits |= (BigInt(1) << BigInt(249));
   }
   if (flags.usePermit2) {
-    traits |= (1n << 248n);
+    traits |= (BigInt(1) << BigInt(248));
   }
   if (flags.unwrapWeth) {
-    traits |= (1n << 247n);
+    traits |= (BigInt(1) << BigInt(247));
   }
   
   return traits;
@@ -140,11 +140,13 @@ async function signOrder(
   };
 
   const signature = await signer.signTypedData(domain, types, value);
+  
+  // Fix: Use Signature.from() for ethers v6
   const { r, s, v } = ethers.Signature.from(signature);
   
   let vsBigInt = BigInt(s);
   if (v === 28) {
-    vsBigInt |= (1n << 255n);
+    vsBigInt |= (BigInt(1) << BigInt(255));
   }
   const vs = ethers.zeroPadValue(ethers.toBeHex(vsBigInt), 32);
 
@@ -190,6 +192,8 @@ async function signOptionsNFT(
   };
 
   const signature = await signer.signTypedData(domain, types, value);
+  
+  // Fix: Use Signature.from() for ethers v6
   const { r, s, v } = ethers.Signature.from(signature);
 
   return { signature, r, s, v, salt: finalSalt };

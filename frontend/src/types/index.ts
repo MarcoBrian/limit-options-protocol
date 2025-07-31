@@ -84,6 +84,7 @@ export interface WalletContextType {
   disconnect: () => void;
   signMessage: (message: string) => Promise<string>;
   provider: any;
+  signer: any; // Add signer property
 }
 
 export interface AppContextType {

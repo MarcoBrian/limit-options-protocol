@@ -12,6 +12,7 @@ interface WalletProviderProps {
 export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
   const [account, setAccount] = useState<string | null>(null);
   const [provider, setProvider] = useState<any>(null);
+  const [signer, setSigner] = useState<any>(null); // Add signer state
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [chainId, setChainId] = useState<number | null>(null);
@@ -30,12 +31,26 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       const provider = new ethers.BrowserProvider(ethereum);
       setProvider(provider);
 
+      // Get signer when provider is set
+      const getSigner = async () => {
+        try {
+          const signer = await provider.getSigner();
+          setSigner(signer);
+        } catch (error) {
+          console.error('Error getting signer:', error);
+        }
+      };
+      getSigner();
+
       // Check if already connected
       ethereum.request({ method: 'eth_accounts' })
-        .then((accounts: string[]) => {
+        .then(async (accounts: string[]) => {
           if (accounts.length > 0) {
             setAccount(accounts[0]);
             setIsConnected(true);
+            // Get signer for connected account
+            const signer = await provider.getSigner();
+            setSigner(signer);
           }
         })
         .catch((err: any) => {
@@ -51,13 +66,17 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
         .catch(console.error);
 
       // Listen for account changes
-      ethereum.on('accountsChanged', (accounts: string[]) => {
+      ethereum.on('accountsChanged', async (accounts: string[]) => {
         if (accounts.length > 0) {
           setAccount(accounts[0]);
           setIsConnected(true);
+          // Update signer for new account
+          const signer = await provider.getSigner();
+          setSigner(signer);
         } else {
           setAccount(null);
           setIsConnected(false);
+          setSigner(null);
         }
       });
 
@@ -85,9 +104,14 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       if (accounts.length > 0) {
         setAccount(accounts[0]);
         setIsConnected(true);
-        setManuallyDisconnected(false); // Reset manually disconnected state
         const provider = new ethers.BrowserProvider(ethereum);
         setProvider(provider);
+        
+        // Get signer for connected account
+        const signer = await provider.getSigner();
+        setSigner(signer);
+        
+        setManuallyDisconnected(false); // Reset manually disconnected state
         showToast('Wallet connected successfully!', 'success');
       } else {
         throw new Error('No accounts found');
@@ -114,6 +138,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       setAccount(null);
       setIsConnected(false);
       setProvider(null);
+      setSigner(null);
     } finally {
       setIsConnecting(false);
     }
@@ -137,6 +162,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       setAccount(null);
       setIsConnected(false);
       setProvider(null);
+      setSigner(null);
       setChainId(null);
       setManuallyDisconnected(true); // Set manuallyDisconnected to true after disconnect
       showToast('Wallet disconnected', 'info');
@@ -144,12 +170,11 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
   };
 
   const signMessage = async (message: string): Promise<string> => {
-    if (!provider || !account) {
+    if (!signer || !account) {
       throw new Error('Wallet not connected');
     }
 
     try {
-      const signer = await provider.getSigner();
       const signature = await signer.signMessage(message);
       return signature;
     } catch (error: any) {
@@ -176,6 +201,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
     disconnect,
     signMessage,
     provider,
+    signer, // Add signer to context
   };
 
   return (

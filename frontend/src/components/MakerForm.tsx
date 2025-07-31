@@ -2,9 +2,10 @@ import React, { useState } from 'react';
 import { useWallet } from '../contexts/WalletContext';
 import { useApp } from '../contexts/AppContext';
 import { OrderSubmission, Order, OrderSignature, OptionParams } from '../types';
+import { buildCompleteCallOption } from '../utils/orderBuilder';
 
 const MakerForm: React.FC = () => {
-  const { account, isConnected } = useWallet();
+  const { account, isConnected, signer } = useWallet(); // Get signer from context
   const { submitOrder, loading, error } = useApp();
   
   const [formData, setFormData] = useState({
@@ -27,47 +28,64 @@ const MakerForm: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!isConnected) {
+    if (!isConnected || !signer) {
       alert('Please connect your wallet first');
       return;
     }
 
     try {
-      // Create mock order data (in a real app, this would be generated properly)
-      const order: Order = {
-        salt: Date.now().toString(),
-        maker: account!,
-        receiver: account!,
-        makerAsset: formData.underlyingAsset,
-        takerAsset: formData.strikeAsset,
-        makingAmount: formData.optionAmount,
-        takingAmount: formData.premium,
-        makerTraits: '0',
-      };
-
-      const signature: OrderSignature = {
-        r: '0x' + '0'.repeat(64),
-        s: '0x' + '0'.repeat(64),
-        v: 27,
-      };
-
-      const optionParams: OptionParams = {
+      // Get contract addresses (you'll need to get these from deployment)
+      const lopAddress = '0x...'; // Get from .env or deployment
+      const optionsNFTAddress = '0x...'; // Get from .env or deployment
+      const dummyTokenAddress = '0x...'; // Get from .env or deployment
+      
+      // Build complete order with proper signatures using signer
+      const orderData = await buildCompleteCallOption({
+        makerSigner: signer, // Use the signer from context
         underlyingAsset: formData.underlyingAsset,
         strikeAsset: formData.strikeAsset,
+        dummyTokenAddress,
         strikePrice: formData.strikePrice,
         optionAmount: formData.optionAmount,
         premium: formData.premium,
         expiry: Math.floor(new Date(formData.expiry).getTime() / 1000),
-        nonce: Date.now(),
-      };
+        lopAddress,
+        optionsNFTAddress
+      });
 
+      // Convert to OrderSubmission format
       const orderSubmission: OrderSubmission = {
-        order,
-        signature,
-        lopAddress: '0x' + '0'.repeat(40), // Mock LOP address
-        optionParams,
-        optionsNFTSignature: signature,
-        optionsNFTAddress: '0x' + '0'.repeat(40), // Mock NFT address
+        order: {
+          salt: orderData.order.salt.toString(),
+          maker: orderData.originalAddresses.maker,
+          receiver: orderData.originalAddresses.receiver,
+          makerAsset: orderData.originalAddresses.makerAsset,
+          takerAsset: orderData.originalAddresses.takerAsset,
+          makingAmount: orderData.order.makingAmount.toString(),
+          takingAmount: orderData.order.takingAmount.toString(),
+          makerTraits: orderData.order.makerTraits.toString(),
+        },
+        signature: {
+          r: orderData.lopSignature.r,
+          s: orderData.lopSignature.s,
+          v: orderData.lopSignature.v,
+        },
+        lopAddress,
+        optionParams: {
+          underlyingAsset: orderData.optionParams.underlyingAsset,
+          strikeAsset: orderData.optionParams.strikeAsset,
+          strikePrice: orderData.optionParams.strikePrice.toString(),
+          optionAmount: orderData.optionParams.optionAmount.toString(),
+          premium: formData.premium,
+          expiry: Number(orderData.optionParams.expiry),
+          nonce: orderData.salt,
+        },
+        optionsNFTSignature: {
+          r: orderData.optionsNFTSignature.r,
+          s: orderData.optionsNFTSignature.s,
+          v: orderData.optionsNFTSignature.v,
+        },
+        optionsNFTAddress,
       };
 
       await submitOrder(orderSubmission);
@@ -83,6 +101,7 @@ const MakerForm: React.FC = () => {
         expiry: '',
       });
     } catch (err: any) {
+      console.error('Error submitting order:', err);
       alert(`Error submitting order: ${err.message}`);
     }
   };
@@ -134,6 +153,7 @@ const MakerForm: React.FC = () => {
               className="input-field"
               placeholder="0x..."
               required
+              min={0}
             />
           </div>
 

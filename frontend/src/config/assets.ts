@@ -79,6 +79,13 @@ export const STRIKE_ASSETS: Asset[] = [
     address: '0xB8c8C8C8C8C8C8C8C8C8C8C8C8C8C8C8C8C8C8', // Mock USDT
     decimals: 6,
     logo: '🟢'
+  },
+  {
+    symbol: 'ETH',
+    name: 'Ethereum',
+    address: contractAddresses.mockETHAddress || '0x0000000000000000000000000000000000000000',
+    decimals: 18,
+    logo: '🟣'
   }
 ];
 
@@ -112,9 +119,27 @@ export const validateAssetPair = (underlyingAsset: string, strikeAsset: string):
 
 // Get available strike assets (excluding the selected underlying asset)
 export const getAvailableStrikeAssets = (underlyingAsset: string): Asset[] => {
-  return STRIKE_ASSETS.filter(asset => 
-    asset.address.toLowerCase() !== underlyingAsset.toLowerCase()
+  // Handle empty or invalid underlying asset
+  if (!underlyingAsset || underlyingAsset.trim() === '') {
+    return STRIKE_ASSETS;
+  }
+  
+  // Find the underlying asset to get its symbol
+  const underlyingAssetObj = UNDERLYING_ASSETS.find(asset => 
+    asset.address.toLowerCase() === underlyingAsset.toLowerCase()
   );
+  
+  if (!underlyingAssetObj) {
+    // If we can't find the underlying asset, return all strike assets
+    return STRIKE_ASSETS;
+  }
+  
+  // Exclude assets with the same symbol (not just address)
+  const availableAssets = STRIKE_ASSETS.filter(asset => 
+    asset.symbol.toLowerCase() !== underlyingAssetObj.symbol.toLowerCase()
+  );
+  
+  return availableAssets;
 };
 
 // Get underlying assets

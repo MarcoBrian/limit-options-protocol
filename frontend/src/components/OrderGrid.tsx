@@ -1,20 +1,18 @@
 import React, { useEffect } from 'react';
-import { useApp } from '../contexts/AppContext';
 import { useWallet } from '../contexts/WalletContext';
+import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 
 const OrderGrid: React.FC = () => {
-  const { orders, loading, error, fetchOrders } = useApp();
   const { isConnected } = useWallet();
+  const { orders, loading, error, fetchOrders } = useApp();
   const { showToast } = useToast();
 
-  // Fetch orders only once when component mounts
   useEffect(() => {
-    // Only fetch if we don't have orders already
     if (orders.length === 0) {
       fetchOrders();
     }
-  }, []); // Empty dependency array - only run once
+  }, [orders.length, fetchOrders]); // Fixed dependencies
 
   const formatAddress = (address: string) => {
     if (!address) return 'N/A';
@@ -25,20 +23,14 @@ const OrderGrid: React.FC = () => {
     if (!amount) return '0';
     try {
       const num = parseInt(amount) / Math.pow(10, decimals);
-      return num.toFixed(4);
+      return num.toFixed(2);
     } catch (error) {
       return '0';
     }
   };
 
   const formatUSDCAmount = (amount: string) => {
-    if (!amount) return '0';
-    try {
-      const num = parseInt(amount) / Math.pow(10, 6); // USDC has 6 decimals
-      return num.toFixed(2);
-    } catch (error) {
-      return '0';
-    }
+    return formatAmount(amount, 6);
   };
 
   const getAssetSymbol = (address: string) => {
@@ -112,16 +104,13 @@ const OrderGrid: React.FC = () => {
           className="btn-secondary"
           disabled={loading}
         >
-          {loading ? 'Refreshing...' : 'Refresh'}
+          Refresh
         </button>
       </div>
 
       {orders.length === 0 ? (
         <div className="text-center py-12">
-          <div className="text-text-secondary text-lg mb-4">
-            No options available at the moment
-          </div>
-          <p className="text-text-secondary text-sm">
+          <p className="text-text-secondary">
             Create some options using the "Create" tab to see them here
           </p>
         </div>
@@ -129,7 +118,6 @@ const OrderGrid: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {orders.map((order, index) => {
             const optionParams = order.optionParams;
-            const orderData = order.orderData;
             
             return (
               <div key={order.order_hash || index} className="card hover:shadow-lg transition-shadow">
@@ -176,13 +164,13 @@ const OrderGrid: React.FC = () => {
                         <div className="flex justify-between">
                           <span className="text-sm text-text-secondary">Option Amount:</span>
                           <span className="text-sm font-medium">
-                            {formatAmount(optionParams.optionAmount)} {getAssetSymbol(order.maker_asset)}
+                            {formatAmount(optionParams.optionAmount)} {getAssetSymbol(optionParams.underlyingAsset)}
                           </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-sm text-text-secondary">Premium:</span>
                           <span className="text-sm font-medium">
-                            {formatAmount(optionParams.premium)} {getAssetSymbol(order.taker_asset)}
+                            {formatUSDCAmount(optionParams.premium)} {getAssetSymbol(order.taker_asset)}
                           </span>
                         </div>
                         <div className="flex justify-between">

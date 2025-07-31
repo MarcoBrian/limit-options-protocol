@@ -26,9 +26,10 @@ const AssetSelector: React.FC<AssetSelectorProps> = ({
   const getAvailableAssets = (): Asset[] => {
     if (assetType === 'strike') {
       // For strike assets, exclude the selected underlying asset
-      return excludeAsset 
+      const assets = excludeAsset && excludeAsset.trim() !== '' 
         ? getAvailableStrikeAssets(excludeAsset)
         : STRIKE_ASSETS;
+      return assets;
     } else {
       // For underlying assets, use underlying assets list
       return UNDERLYING_ASSETS;
@@ -38,7 +39,8 @@ const AssetSelector: React.FC<AssetSelectorProps> = ({
   const availableAssets = getAvailableAssets();
 
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    onChange(e.target.value);
+    const selectedAddress = e.target.value;
+    onChange(selectedAddress);
   };
 
   return (

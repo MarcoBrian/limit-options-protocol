@@ -7,6 +7,7 @@ import { buildCompleteCallOption } from '../utils/orderBuilder';
 import AssetSelector from './AssetSelector';
 import { validateAssetPair } from '../config/assets';
 import { getContractAddresses, validateContractAddresses } from '../config/contracts';
+import { formatStrikePrice, formatPremium, formatOptionAmount } from '../utils/formatters';
 
 const MakerForm: React.FC = () => {
   const { isConnected, signer } = useWallet();
@@ -93,15 +94,20 @@ const MakerForm: React.FC = () => {
     }
 
     try {
+      // Format amounts to proper decimal format
+      const formattedStrikePrice = formatStrikePrice(formData.strikePrice, formData.strikeAsset);
+      const formattedPremium = formatPremium(formData.premium, formData.strikeAsset);
+      const formattedOptionAmount = formatOptionAmount(formData.optionAmount, formData.underlyingAsset);
+
       // Build complete order with proper signatures using signer
       const orderData = await buildCompleteCallOption({
         makerSigner: signer,
         underlyingAsset: formData.underlyingAsset,
         strikeAsset: formData.strikeAsset,
         dummyTokenAddress: contractAddresses.dummyTokenAddress,
-        strikePrice: formData.strikePrice,
-        optionAmount: formData.optionAmount,
-        premium: formData.premium,
+        strikePrice: formattedStrikePrice,
+        optionAmount: formattedOptionAmount,
+        premium: formattedPremium,
         expiry: Math.floor(new Date(formData.expiry).getTime() / 1000),
         lopAddress: contractAddresses.lopAddress,
         optionsNFTAddress: contractAddresses.optionsNFTAddress
@@ -130,7 +136,7 @@ const MakerForm: React.FC = () => {
           strikeAsset: orderData.optionParams.strikeAsset,
           strikePrice: orderData.optionParams.strikePrice.toString(),
           optionAmount: orderData.optionParams.optionAmount.toString(),
-          premium: formData.premium,
+          premium: formattedPremium,
           expiry: Number(orderData.optionParams.expiry),
           nonce: orderData.salt,
         },
@@ -142,7 +148,7 @@ const MakerForm: React.FC = () => {
         optionsNFTAddress: contractAddresses.optionsNFTAddress,
       };
 
-      const response = await submitOrder(orderSubmission);
+      await submitOrder(orderSubmission);
       showToast('Order submitted successfully!', 'success');
       
       // Reset form
@@ -214,7 +220,7 @@ const MakerForm: React.FC = () => {
 
           <div>
             <label htmlFor="optionAmount" className="form-label">
-              Option Amount 
+              Option Amount (whole units)
             </label>
             <input
               type="number"
@@ -232,7 +238,7 @@ const MakerForm: React.FC = () => {
 
           <div>
             <label htmlFor="strikePrice" className="form-label">
-              Strike Price ($)
+              Strike Price (USD)
             </label>
             <input
               type="number"
@@ -241,16 +247,16 @@ const MakerForm: React.FC = () => {
               value={formData.strikePrice}
               onChange={handleInputChange}
               className="input-field"
-              placeholder="$3000"
+              placeholder="3000.50"
               required
-              min="1"
-              step="1"
+              min="0.01"
+              step="0.01"
             />
           </div>
 
           <div>
             <label htmlFor="premium" className="form-label">
-              Premium ($)
+              Premium (USD)
             </label>
             <input
               type="number"
@@ -259,10 +265,10 @@ const MakerForm: React.FC = () => {
               value={formData.premium}
               onChange={handleInputChange}
               className="input-field"
-              placeholder="100"
+              placeholder="100.00"
               required
-              min="0"
-              step="1"
+              min="0.01"
+              step="0.01"
             />
           </div>
 
@@ -281,6 +287,8 @@ const MakerForm: React.FC = () => {
             />
           </div>
         </div>
+
+        {/* The formatted preview block is removed as per the edit hint */}
 
         <div className="flex justify-end">
           <button

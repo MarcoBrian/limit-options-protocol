@@ -1,46 +1,88 @@
 // frontend/src/utils/orderBuilder.ts
 import { ethers } from 'ethers';
+import { OrderHashManager, RandomNonceManager } from './nonceManager';
 
-// Empty export to make this a module
-export {};
+// Note: Using simplified MakerTraits implementation for browser compatibility
+// The @1inch/limit-order-sdk has Node.js dependencies that cause build issues
+
+/**
+ * Create MakerTraits using simplified implementation (browser-compatible)
+ * Reusable helper for creating MakerTraits without SDK dependencies
+ */
+function createMakerTraitsSimple(options: any = {}): bigint {
+  console.log(`🔧 Creating MakerTraits with simplified implementation (Browser-compatible)...`);
+  
+  let traits = BigInt(0);
+  
+  // Set nonce in bits [120..159] (40 bits)
+  if (options.nonce !== undefined) {
+    const nonceValue = BigInt(options.nonce) & (BigInt(1) << BigInt(40) - BigInt(1));
+    traits |= (nonceValue << BigInt(120));
+    console.log(`   ✅ Set nonce: ${options.nonce}`);
+  }
+  
+  // Set flags using bit operations
+  if (options.allowPartialFill === false) {
+    traits |= (BigInt(1) << BigInt(255));
+    console.log(`   ✅ Disabled partial fills`);
+  }
+  
+  if (options.allowMultipleFills === false) {
+    traits |= (BigInt(1) << BigInt(254));
+    console.log(`   ✅ Disabled multiple fills`);
+  }
+  
+  if (options.postInteraction) {
+    traits |= (BigInt(1) << BigInt(251));
+    console.log(`   ✅ Enabled post-interaction`);
+  }
+  
+  if (options.preInteraction) {
+    traits |= (BigInt(1) << BigInt(252));
+    console.log(`   ✅ Enabled pre-interaction`);
+  }
+  
+  if (options.usePermit2) {
+    traits |= (BigInt(1) << BigInt(248));
+    console.log(`   ✅ Enabled Permit2`);
+  }
+  
+  if (options.unwrapWeth) {
+    traits |= (BigInt(1) << BigInt(247));
+    console.log(`   ✅ Enabled WETH unwrapping`);
+  }
+  
+  // Handle allowedSender (simplified - not implemented in browser version)
+  if (options.allowedSender && options.allowedSender !== '0x0000000000000000000000000000000000000000') {
+    console.log(`   ⚠️ Skipped allowed sender (not implemented in browser version)`);
+  }
+  
+  if (options.expiration) {
+    // Set expiration in bits [160..191] (32 bits)
+    const expirationValue = BigInt(options.expiration) & (BigInt(1) << BigInt(32) - BigInt(1));
+    traits |= (expirationValue << BigInt(160));
+    console.log(`   ✅ Set expiration: ${options.expiration}`);
+  }
+  
+  // Log analysis
+  const extractedNonce = (traits >> BigInt(120)) & (BigInt(1) << BigInt(40) - BigInt(1));
+  const hasPostInteraction = (traits & (BigInt(1) << BigInt(251))) !== BigInt(0);
+  const hasPartialFillsDisabled = (traits & (BigInt(1) << BigInt(255))) !== BigInt(0);
+  const hasMultipleFillsDisabled = (traits & (BigInt(1) << BigInt(254))) !== BigInt(0);
+  
+  console.log(`   📊 Analysis:`);
+  console.log(`      Nonce set: ${options.nonce || 0} → Extracted: ${extractedNonce}`);
+  console.log(`      Partial fills allowed: ${!hasPartialFillsDisabled}`);
+  console.log(`      Multiple fills allowed: ${!hasMultipleFillsDisabled}`);
+  console.log(`      Has post-interaction: ${hasPostInteraction}`);
+  
+  return traits;
+}
 
 // Helper to encode address as 32-byte left-padded hex string (1inch Address type)
 function toAddressType(addr: string): string {
   addr = addr.toLowerCase().replace(/^0x/, "");
   return "0x" + addr.padStart(64, "0");
-}
-
-// Helper to set maker traits flags
-function setMakerTraits(flags: any = {}, nonce: number = 0): bigint {
-  let traits = BigInt(0);
-  
-  // Set nonce in bits [120..159] (40 bits)
-  const nonceValue = BigInt(nonce) & (BigInt(1) << BigInt(40) - BigInt(1));
-  traits |= (nonceValue << BigInt(120));
-  
-  if (flags.postInteraction) {
-    traits |= (BigInt(1) << BigInt(251));
-  }
-  if (flags.noPartialFills) {
-    traits |= (BigInt(1) << BigInt(255));
-  }
-  if (flags.allowMultipleFills) {
-    traits |= (BigInt(1) << BigInt(254));
-  }
-  if (flags.preInteraction) {
-    traits |= (BigInt(1) << BigInt(252));
-  }
-  if (flags.hasExtension) {
-    traits |= (BigInt(1) << BigInt(249));
-  }
-  if (flags.usePermit2) {
-    traits |= (BigInt(1) << BigInt(248));
-  }
-  if (flags.unwrapWeth) {
-    traits |= (BigInt(1) << BigInt(247));
-  }
-  
-  return traits;
 }
 
 // Build a standard LOP order
@@ -77,7 +119,7 @@ function buildOrder(params: {
     takerAsset: toAddressType(takerAsset),
     makingAmount: BigInt(makingAmount),
     takingAmount: BigInt(takingAmount),
-    makerTraits: customMakerTraits !== null ? customMakerTraits : setMakerTraits(makerTraits, lopNonce)
+    makerTraits: customMakerTraits !== null ? customMakerTraits : createMakerTraitsSimple({ nonce: lopNonce, ...makerTraits })
   };
 
   const orderTuple = [
@@ -295,32 +337,57 @@ export async function buildCompleteCallOption(params: {
     premium,
     expiry,
     lopAddress,
-    optionsNFTAddress,
-    salt,
-    lopNonce,
-    customMakerTraits
+    optionsNFTAddress
   } = params;
 
-  let finalSalt = salt;
-  if (finalSalt === undefined) {
-    finalSalt = generateUniqueSalt(await makerSigner.getAddress(), {
-      underlyingAsset,
-      strikeAsset,
-      strikePrice: BigInt(strikePrice),
-      expiry: BigInt(expiry),
-      optionAmount: BigInt(optionAmount)
-    });
-  }
+  const makerAddress = await makerSigner.getAddress();
 
-  // 1. Build the LOP order
+  // Initialize nonce manager and hash manager like backend
+  console.log('\n🔍 Creating order hash manager for OptionsNFT salt...');
+  const hashManager = new OrderHashManager();
+  
+  console.log('\n🎲 Initializing random nonce manager...');
+  const nonceManager = new RandomNonceManager();
+
+  // Generate unique salt using hash manager (like backend)
+  const optionParams = {
+    underlyingAsset,
+    strikeAsset,
+    strikePrice: BigInt(strikePrice),
+    expiry: BigInt(expiry),
+    optionAmount: BigInt(optionAmount)
+  };
+  
+  const finalSalt = hashManager.generateUniqueSalt(makerAddress, {
+    underlyingAsset,
+    strikeAsset,
+    strikePrice: BigInt(strikePrice),
+    expiry: BigInt(expiry),
+    optionAmount: BigInt(optionAmount)
+  });
+  console.log(`   Generated OptionsNFT salt: ${finalSalt}`);
+
+  // Get LOP nonce using nonce manager (like backend)
+  const lopNonceValue = await nonceManager.getRandomNonce(makerAddress);
+  console.log(`   Using LOP nonce: ${lopNonceValue}`);
+
+  // Create MakerTraits using simplified approach (like backend)
+  const makerTraitsBigInt = createMakerTraitsSimple({
+    nonce: lopNonceValue,
+    allowPartialFill: false,  // No partial fills for options
+    allowMultipleFills: false, // Single fill only
+    postInteraction: true,    // Need post-interaction for OptionsNFT
+  });
+
+  // 1. Build the LOP order with proper nonce and traits
   const orderResult = buildOrder({
-    maker: await makerSigner.getAddress(),
+    maker: makerAddress,
     makerAsset: dummyTokenAddress,
     takerAsset: strikeAsset,
     makingAmount: optionAmount,
     takingAmount: premium,
-    lopNonce,
-    customMakerTraits
+    lopNonce: Number(lopNonceValue),
+    customMakerTraits: makerTraitsBigInt
   });
 
   // 2. Sign the LOP order
@@ -337,12 +404,12 @@ export async function buildCompleteCallOption(params: {
     },
     makerSigner,
     optionsNFTAddress,
-    finalSalt
+    Number(finalSalt)
   );
 
   // 4. Build interaction data
   const interaction = buildOptionsNFTInteraction({
-    maker: await makerSigner.getAddress(),
+    maker: makerAddress,
     optionParams: {
       underlyingAsset,
       strikeAsset,
@@ -368,8 +435,8 @@ export async function buildCompleteCallOption(params: {
     lopSignature,
     optionsNFTSignature,
     interaction,
-    salt: finalSalt,
-    lopNonce: lopNonce || 0
+    salt: Number(finalSalt),
+    lopNonce: Number(lopNonceValue)
   };
 }
 
@@ -380,5 +447,5 @@ export {
   buildOptionsNFTInteraction,
   generateUniqueSalt,
   toAddressType,
-  setMakerTraits
+  createMakerTraitsSimple
 };

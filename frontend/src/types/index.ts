@@ -32,7 +32,6 @@ export interface OptionParams {
   optionAmount: string;
   premium: string;
   expiry: number;
-  nonce: number;
 }
 
 export interface OrderSubmission {

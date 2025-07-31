@@ -4,6 +4,7 @@ import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { OrderSubmission } from '../types';
 import { buildCompleteCallOption } from '../utils/orderBuilder';
+import { OrderHashManager, RandomNonceManager } from '../utils/nonceManager';
 import AssetSelector from './AssetSelector';
 import { validateAssetPair } from '../config/assets';
 import { getContractAddresses, validateContractAddresses } from '../config/contracts';
@@ -99,7 +100,31 @@ const MakerForm: React.FC = () => {
       const formattedPremium = formatPremium(formData.premium, formData.strikeAsset);
       const formattedOptionAmount = formatOptionAmount(formData.optionAmount, formData.underlyingAsset);
 
-      // Build complete order with proper signatures using signer
+      const makerAddress = await signer.getAddress();
+
+      // Create order hash manager for OptionsNFT salt (like backend)
+      console.log('\n🔍 Creating order hash manager for OptionsNFT salt...');
+      const hashManager = new OrderHashManager();
+      
+      // Generate unique salt using hash manager (like backend)
+      const optionParams = {
+        underlyingAsset: formData.underlyingAsset,
+        strikeAsset: formData.strikeAsset,
+        strikePrice: formattedStrikePrice,
+        expiry: Math.floor(new Date(formData.expiry).getTime() / 1000),
+        optionAmount: formattedOptionAmount
+      };
+      
+      const salt = hashManager.generateUniqueSalt(makerAddress, optionParams);
+      console.log(`   Generated OptionsNFT salt: ${salt}`);
+
+      // Get LOP nonce using nonce manager (like backend)
+      console.log('\n🎲 Getting nonce using random approach (1inch pattern)...');
+      const nonceManager = new RandomNonceManager();
+      const lopNonce = await nonceManager.getRandomNonce(makerAddress);
+      console.log(`   Using LOP nonce: ${lopNonce}`);
+
+      // Build complete order with proper signatures using signer (now matches backend approach)
       const orderData = await buildCompleteCallOption({
         makerSigner: signer,
         underlyingAsset: formData.underlyingAsset,
@@ -110,10 +135,12 @@ const MakerForm: React.FC = () => {
         premium: formattedPremium,
         expiry: Math.floor(new Date(formData.expiry).getTime() / 1000),
         lopAddress: contractAddresses.lopAddress,
-        optionsNFTAddress: contractAddresses.optionsNFTAddress
+        optionsNFTAddress: contractAddresses.optionsNFTAddress,
+        salt: Number(salt),
+        lopNonce: Number(lopNonce)
       });
 
-      // Convert to OrderSubmission format
+      // Convert to OrderSubmission format (now uses proper salt and lopNonce from backend approach)
       const orderSubmission: OrderSubmission = {
         order: {
           salt: orderData.order.salt.toString(),
@@ -137,8 +164,7 @@ const MakerForm: React.FC = () => {
           strikePrice: orderData.optionParams.strikePrice.toString(),
           optionAmount: orderData.optionParams.optionAmount.toString(),
           premium: formattedPremium,
-          expiry: Number(orderData.optionParams.expiry),
-          nonce: orderData.salt,
+          expiry: Number(orderData.optionParams.expiry)
         },
         optionsNFTSignature: {
           r: orderData.optionsNFTSignature.r,

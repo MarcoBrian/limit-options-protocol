@@ -1,13 +1,13 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { ordersApi } from '../services/api';
-import { OrderSubmission } from '../types';
+import { OrderSubmission, OrdersResponse, OrderResponse } from '../types';
 
 interface AppContextType {
   orders: any[];
   loading: boolean;
   error: string | null;
   fetchOrders: () => Promise<void>;
-  submitOrder: (orderData: OrderSubmission) => Promise<void>;
+  submitOrder: (orderData: OrderSubmission) => Promise<OrderResponse>;
   exerciseOption: (optionId: number) => Promise<void>;
 }
 
@@ -22,43 +22,49 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchOrders = async () => {
+  const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const response = await ordersApi.getOrders();
-      if (response.success) {
-        setOrders(response.data.orders);
+      const response: OrdersResponse = await ordersApi.getOrders();
+      
+      if (response.success && response.data) {
+        setOrders(response.data.orders || []);
       } else {
-        setError('Failed to fetch orders');
+        setError('Failed to fetch orders: Invalid response format');
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch orders');
+      console.error('Error fetching orders:', err);
+      setError(err.response?.data?.message || err.message || 'Failed to fetch orders');
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const submitOrder = async (orderData: OrderSubmission) => {
+  const submitOrder = useCallback(async (orderData: OrderSubmission) => {
     try {
       setLoading(true);
       setError(null);
       const response = await ordersApi.submitOrder(orderData);
+      
       if (response.success) {
         // Refresh orders after successful submission
         await fetchOrders();
+        return response;
       } else {
-        setError(response.message || 'Failed to submit order');
+        throw new Error(response.message || 'Failed to submit order');
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to submit order');
+      console.error('Error submitting order:', err);
+      const errorMessage = err.response?.data?.message || err.message || 'Failed to submit order';
+      setError(errorMessage);
       throw err;
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchOrders]);
 
-  const exerciseOption = async (optionId: number) => {
+  const exerciseOption = useCallback(async (optionId: number) => {
     try {
       setLoading(true);
       setError(null);
@@ -66,16 +72,16 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
       console.log('Exercising option:', optionId);
       // This would typically call a smart contract function
     } catch (err: any) {
+      console.error('Error exercising option:', err);
       setError(err.message || 'Failed to exercise option');
       throw err;
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchOrders();
   }, []);
+
+  // Don't auto-fetch on mount to avoid unnecessary API calls
+  // Users can manually refresh or fetch when needed
 
   const value: AppContextType = {
     orders,

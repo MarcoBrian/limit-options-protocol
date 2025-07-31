@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useWallet } from '../contexts/WalletContext';
 import { useApp } from '../contexts/AppContext';
+import { useToast } from '../contexts/ToastContext';
 import { OrderSubmission } from '../types';
 import { buildCompleteCallOption } from '../utils/orderBuilder';
 import AssetSelector from './AssetSelector';
@@ -10,6 +11,7 @@ import { getContractAddresses, validateContractAddresses } from '../config/contr
 const MakerForm: React.FC = () => {
   const { isConnected, signer } = useWallet();
   const { submitOrder, loading, error } = useApp();
+  const { showToast } = useToast();
   
   const [formData, setFormData] = useState({
     underlyingAsset: '',
@@ -82,7 +84,7 @@ const MakerForm: React.FC = () => {
     e.preventDefault();
     
     if (!isConnected || !signer) {
-      alert('Please connect your wallet first');
+      showToast('Please connect your wallet first', 'warning');
       return;
     }
 
@@ -140,8 +142,8 @@ const MakerForm: React.FC = () => {
         optionsNFTAddress: contractAddresses.optionsNFTAddress,
       };
 
-      await submitOrder(orderSubmission);
-      alert('Order submitted successfully!');
+      const response = await submitOrder(orderSubmission);
+      showToast('Order submitted successfully!', 'success');
       
       // Reset form
       setFormData({
@@ -155,7 +157,7 @@ const MakerForm: React.FC = () => {
       setValidationError('');
     } catch (err: any) {
       console.error('Error submitting order:', err);
-      alert(`Error submitting order: ${err.message}`);
+      showToast(`Error submitting order: ${err.message}`, 'error');
     }
   };
 

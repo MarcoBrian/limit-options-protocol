@@ -16,19 +16,23 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 
-// Rate limiting
+// Rate limiting - more lenient for development
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes default
+  max: parseInt(process.env.RATE_LIMIT_MAX) || 1000, // 1000 requests per window for development
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
 });
-app.use(limiter);
+
+// Apply rate limiting only to API routes, not health checks
+app.use('/api', limiter);
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Health check endpoint
+// Health check endpoint (no rate limiting)
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy', 
@@ -64,6 +68,7 @@ async function startServer() {
       console.log(`🚀 Options Protocol Relayer running on port ${PORT}`);
       console.log(`📊 Health check: http://localhost:${PORT}/health`);
       console.log(`📋 API docs: http://localhost:${PORT}/api/orders`);
+      console.log(`🔒 Rate limit: ${process.env.RATE_LIMIT_MAX || 1000} requests per ${(parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000) / 1000 / 60} minutes`);
     });
   } catch (error) {
     console.error('❌ Failed to start server:', error);

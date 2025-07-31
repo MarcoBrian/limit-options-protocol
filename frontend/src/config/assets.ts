@@ -79,13 +79,6 @@ export const STRIKE_ASSETS: Asset[] = [
     address: '0xB8c8C8C8C8C8C8C8C8C8C8C8C8C8C8C8C8C8C8', // Mock USDT
     decimals: 6,
     logo: '🟢'
-  },
-  {
-    symbol: 'ETH',
-    name: 'Ethereum',
-    address: contractAddresses.mockETHAddress || '0x0000000000000000000000000000000000000000',
-    decimals: 18,
-    logo: '🟣'
   }
 ];
 

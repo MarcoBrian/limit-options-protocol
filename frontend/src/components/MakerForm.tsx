@@ -121,8 +121,12 @@ const MakerForm: React.FC = () => {
       // Get LOP nonce using nonce manager (like backend)
       console.log('\n🎲 Getting nonce using random approach (1inch pattern)...');
       const nonceManager = new RandomNonceManager();
-      const lopNonce = await nonceManager.getRandomNonce(makerAddress);
-      console.log(`   Using LOP nonce: ${lopNonce}`);
+      const lopNonceBigInt = await nonceManager.getRandomNonce(makerAddress, null); // Pass null for LOP contract like backend
+      console.log(`   Using LOP nonce: ${lopNonceBigInt}`);
+      
+      // For testing, use the small nonce directly (it's already small)
+      const lopNonce = Number(lopNonceBigInt);
+      console.log(`   Using test nonce: ${lopNonce}`);
 
       // Build complete order with proper signatures using signer (now matches backend approach)
       const orderData = await buildCompleteCallOption({
@@ -136,8 +140,8 @@ const MakerForm: React.FC = () => {
         expiry: Math.floor(new Date(formData.expiry).getTime() / 1000),
         lopAddress: contractAddresses.lopAddress,
         optionsNFTAddress: contractAddresses.optionsNFTAddress,
-        salt: Number(salt),
-        lopNonce: Number(lopNonce)
+        salt: salt, // Don't convert to Number() to avoid overflow
+        lopNonce: lopNonce // Use small test nonce
       });
 
       // Convert to OrderSubmission format (now uses proper salt and lopNonce from backend approach)
@@ -172,6 +176,8 @@ const MakerForm: React.FC = () => {
           v: orderData.optionsNFTSignature.v,
         },
         optionsNFTAddress: contractAddresses.optionsNFTAddress,
+        optionsNFTSalt: orderData.optionsNFTSignature.salt.toString(), // Use the signature salt, not the generated salt
+        interactionData: orderData.interaction, // Use the full interaction hex string
       };
 
       await submitOrder(orderSubmission);

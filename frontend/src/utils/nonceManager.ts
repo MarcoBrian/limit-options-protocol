@@ -11,15 +11,14 @@ export class OrderHashManager {
       maker: makerAddress,
       underlyingAsset: optionParams.underlyingAsset,
       strikeAsset: optionParams.strikeAsset,
-      strikePrice: typeof optionParams.strikePrice === 'bigint' ? optionParams.strikePrice.toString() : optionParams.strikePrice.toString(),
-      expiry: typeof optionParams.expiry === 'bigint' ? optionParams.expiry.toString() : optionParams.expiry.toString(),
-      optionAmount: typeof optionParams.optionAmount === 'bigint' ? optionParams.optionAmount.toString() : optionParams.optionAmount.toString()
+      strikePrice: optionParams.strikePrice.toString(),
+      expiry: optionParams.expiry,
+      optionAmount: optionParams.optionAmount.toString()
     };
 
     const saltHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(saltData)));
-    // Use a much smaller range to avoid overflow issues with ethers.js
-    // Using 2^53 - 1 (JavaScript's Number.MAX_SAFE_INTEGER) to ensure compatibility
-    const salt = ethers.getBigInt(saltHash) % ethers.getBigInt("0x1fffffffffffff");
+    // Use the same modulo as backend to ensure compatibility but avoid overflow
+    const salt = ethers.getBigInt(saltHash) % ethers.getBigInt("0xffffffffffffffffffffffffffffffffffffffff");
 
     // Ensure uniqueness
     if (this.usedSalts.has(salt.toString())) {
@@ -27,7 +26,7 @@ export class OrderHashManager {
     }
 
     this.usedSalts.add(salt.toString());
-    return salt.toString();
+    return salt.toString(); // Return as string like backend
   }
 }
 
@@ -43,15 +42,17 @@ export class RandomNonceManager {
   generateRandomNonce(): bigint {
     const UINT_40_MAX = 1099511627775n; // 2^40 - 1
     
-    // Generate random BigInt using browser crypto API (matching backend approach)
-    const randomBytes = new Uint8Array(5); // 40 bits = 5 bytes (same as backend)
+    // Generate random BigInt using Web Crypto API (browser-compatible)
+    const randomBytes = new Uint8Array(5); // 40 bits = 5 bytes
     crypto.getRandomValues(randomBytes);
     
-    // Convert to hex string and then to BigInt (same as backend)
-    const hexString = '0x' + Array.from(randomBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    // Convert to hex string and then to BigInt
+    const hexString = '0x' + Array.from(randomBytes)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
     const randomBigInt = ethers.getBigInt(hexString);
     
-    // Ensure it's within UINT_40_MAX range (same as backend)
+    // Ensure it's within UINT_40_MAX range
     const nonce = randomBigInt % (UINT_40_MAX + 1n);
     
     console.log(`   🎲 Generated random nonce: ${nonce} (max: ${UINT_40_MAX})`);
@@ -61,9 +62,10 @@ export class RandomNonceManager {
   /**
    * Get random nonce (1inch pattern)
    * @param {string} maker - Maker address (unused, kept for compatibility)
+   * @param {any} lopContract - LOP contract instance (unused, kept for compatibility)
    * @returns {Promise<bigint>} Random nonce
    */
-  async getRandomNonce(maker: string): Promise<bigint> {
+  async getRandomNonce(maker: string, lopContract?: any): Promise<bigint> {
     console.log(`🎲 Getting random nonce for ${maker} (1inch pattern)...`);
     
     // Simply generate a random nonce - no tracking needed

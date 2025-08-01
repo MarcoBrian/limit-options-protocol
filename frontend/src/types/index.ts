@@ -41,6 +41,8 @@ export interface OrderSubmission {
   optionParams: OptionParams;
   optionsNFTSignature: OrderSignature;
   optionsNFTAddress: string;
+  optionsNFTSalt?: string; // Add optional OptionsNFT salt
+  interactionData?: string; // Add optional interaction data
 }
 
 export interface OrderResponse {

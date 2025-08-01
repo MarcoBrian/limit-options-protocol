@@ -20,25 +20,35 @@ const router = express.Router();
  */
 router.post('/', validateOrderData, validateOrderSignature, async (req, res) => {
   try {
-    const { order, signature, lopAddress, optionParams, optionsNFTSignature, optionsNFTAddress } = req.validatedData;
+    console.log('\n🔍 POST /api/orders - Request received');
+    console.log('   Body keys:', Object.keys(req.body));
+    
+    const { order, signature, lopAddress, optionParams, optionsNFTSignature, optionsNFTAddress, optionsNFTSalt, interactionData } = req.validatedData;
     const { maker } = req.validatedOrder;
 
-    // Generate order hash
-    const orderHash = ethers.keccak256(
-      ethers.AbiCoder.defaultAbiCoder().encode(
-        ['uint256', 'address', 'address', 'address', 'address', 'uint256', 'uint256', 'uint256'],
-        [
-          order.salt,
-          order.maker,
-          order.receiver,
-          order.makerAsset,
-          order.takerAsset,
-          order.makingAmount,
-          order.takingAmount,
-          order.makerTraits
-        ]
-      )
-    );
+    // Generate EIP-712 order hash (same as frontend)
+    const domain = {
+      name: "1inch Limit Order Protocol",
+      version: "4",
+      chainId: process.env.CHAIN_ID || 31337,
+      verifyingContract: lopAddress
+    };
+
+    const types = {
+      Order: [
+        { name: "salt", type: "uint256" },
+        { name: "maker", type: "address" },
+        { name: "receiver", type: "address" },
+        { name: "makerAsset", type: "address" },
+        { name: "takerAsset", type: "address" },
+        { name: "makingAmount", type: "uint256" },
+        { name: "takingAmount", type: "uint256" },
+        { name: "makerTraits", type: "uint256" }
+      ]
+    };
+
+    // Calculate the EIP-712 hash that was actually signed
+    const orderHash = ethers.TypedDataEncoder.hash(domain, types, order);
 
     // Check if order already exists
     const existingOrder = await getOrderByHash(orderHash);
@@ -50,6 +60,12 @@ router.post('/', validateOrderData, validateOrderSignature, async (req, res) => 
     }
 
     // Prepare order data for database
+    // Debug logging for OptionsNFT salt
+    console.log('\n🔍 DEBUG: OptionsNFT Salt Check');
+    console.log('   Received optionsNFTSalt:', optionsNFTSalt);
+    console.log('   Type:', typeof optionsNFTSalt);
+    console.log('   Truthy:', !!optionsNFTSalt);
+
     const orderData = {
       orderHash,
       maker,
@@ -62,7 +78,10 @@ router.post('/', validateOrderData, validateOrderSignature, async (req, res) => 
       makerTraits: order.makerTraits.toString(),
       orderData: order,
       signature: JSON.stringify(signature),
-      optionParams: optionParams || null
+      optionParams: optionParams || null,
+      optionsNFTSignature: optionsNFTSignature || null,
+      optionsNFTSalt: optionsNFTSalt || null,
+      interactionData: interactionData || null
     };
 
     // Insert order into database

@@ -1,12 +1,16 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useWallet } from '../contexts/WalletContext';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
+import { fillOrder } from '../utils/orderFiller';
 
 const OrderGrid: React.FC = () => {
-  const { isConnected } = useWallet();
+  const { isConnected, signer } = useWallet();
   const { orders, loading, error, fetchOrders } = useApp();
   const { showToast } = useToast();
+  
+  const [fillingOrders, setFillingOrders] = useState<Set<string>>(new Set());
+  const [fillProgress, setFillProgress] = useState<{ [key: string]: string }>({});
 
   useEffect(() => {
     if (orders.length === 0) {
@@ -45,20 +49,62 @@ const OrderGrid: React.FC = () => {
   };
 
   const handleBuyOption = async (order: any) => {
-    if (!isConnected) {
+    if (!isConnected || !signer) {
       showToast('Please connect your wallet to buy options', 'warning');
       return;
     }
     
+    const orderHash = order.order_hash;
+    
+    // Prevent multiple simultaneous fills of the same order
+    if (fillingOrders.has(orderHash)) {
+      return;
+    }
+    
     try {
-      // TODO: Implement buy option logic
-      // This would involve:
-      // 1. Calling the smart contract to fill the order
-      // 2. Handling the transaction
-      // 3. Updating the order status
-      showToast('Buy option functionality coming soon!', 'info');
+      // Add order to filling set
+      setFillingOrders(prev => new Set(prev).add(orderHash));
+      setFillProgress(prev => ({ ...prev, [orderHash]: 'Starting...' }));
+      
+      console.log('🛒 Starting to buy option:', orderHash);
+      
+      const result = await fillOrder(
+        order,
+        signer,
+        (status: string) => {
+          setFillProgress(prev => ({ ...prev, [orderHash]: status }));
+        }
+      );
+      
+      // Success!
+      showToast(
+        `Option purchased successfully! ${result.optionTokenId ? `NFT ID: ${result.optionTokenId}` : ''}`,
+        'success'
+      );
+      
+      console.log('🎉 Option purchase completed:', {
+        txHash: result.txHash,
+        optionTokenId: result.optionTokenId
+      });
+      
+      // Refresh orders to remove the filled order
+      await fetchOrders();
+      
     } catch (error: any) {
-      showToast(`Error buying option: ${error.message}`, 'error');
+      console.error('❌ Buy option failed:', error);
+      showToast(`Failed to buy option: ${error.message}`, 'error');
+    } finally {
+      // Clean up loading state
+      setFillingOrders(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(orderHash);
+        return newSet;
+      });
+      setFillProgress(prev => {
+        const newProgress = { ...prev };
+        delete newProgress[orderHash];
+        return newProgress;
+      });
     }
   };
 
@@ -196,14 +242,25 @@ const OrderGrid: React.FC = () => {
                   </div>
 
                   <div className="pt-4 border-t border-border-light">
-                    <button
-                      onClick={() => handleBuyOption(order)}
-                      disabled={!isConnected || order.status !== 'open'}
-                      className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {!isConnected ? 'Connect Wallet' : 
-                       order.status !== 'open' ? 'Not Available' : 'Buy Option'}
-                    </button>
+                    {fillingOrders.has(order.order_hash) ? (
+                      <div className="w-full">
+                        <div className="flex items-center justify-center space-x-2 py-2">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                          <span className="text-sm text-text-secondary">
+                            {fillProgress[order.order_hash] || 'Processing...'}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => handleBuyOption(order)}
+                        disabled={!isConnected || order.status !== 'open' || !signer}
+                        className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {!isConnected ? 'Connect Wallet' : 
+                         order.status !== 'open' ? 'Not Available' : 'Buy Option'}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

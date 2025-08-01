@@ -12,6 +12,8 @@ const {
   createRandomNonceManager
 } = require('../scripts/helpers/nonceManager');
 
+const { loadContractAddresses } = require('../scripts/utils/envLoader');
+
 /**
  * Create and submit an order to the database
  */
@@ -21,14 +23,29 @@ async function createAndSubmitOrder() {
   try {
     // Setup
     const [deployer] = await ethers.getSigners();
+    
+    // Load contract addresses from environment
+    const contractAddresses = loadContractAddresses({ 
+      required: true, 
+      envPath: require('path').join(__dirname, '..', '.env') 
+    });
+    
     const addresses = {
-      mockETHAddress: '0x610178dA211FEF7D417bC0e6FeD39F05609AD788',
-      mockUSDCAddress: '0x8A791620dd6260079BF849Dc5567aDC3F2FdC318',
-      lopAddress: '0xA51c1fc2f0D1a1b8494Ed1FE312d7C3a78Ed91C0',
-      optionsNFTAddress: '0x0DCd1Bf9A1b36cE34237eEaFef220932846BCD82',
-      dummyTokenAddress: '0xB7f8BC63BbcaD18155201308C8f3540b07f84F5e',
+      mockETHAddress: contractAddresses.mockETHAddress,
+      mockUSDCAddress: contractAddresses.mockUSDCAddress,
+      lopAddress: contractAddresses.lopAddress,
+      optionsNFTAddress: contractAddresses.optionsNFTAddress,
+      dummyTokenAddress: contractAddresses.dummyTokenAddress,
       backendUrl: 'http://localhost:3000'
     };
+    
+    console.log('✅ Using contract addresses from .env:');
+    console.log(`   MockETH: ${addresses.mockETHAddress}`);
+    console.log(`   MockUSDC: ${addresses.mockUSDCAddress}`);
+    console.log(`   LOP: ${addresses.lopAddress}`);
+    console.log(`   OptionsNFT: ${addresses.optionsNFTAddress}`);
+    console.log(`   DummyToken: ${addresses.dummyTokenAddress}`);
+    console.log('');
 
     // STEP 1: Setup tokens for maker
     console.log('📋 STEP 1: Setting up tokens for maker...');

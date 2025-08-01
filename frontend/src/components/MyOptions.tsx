@@ -1,56 +1,122 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { ethers } from 'ethers';
 import { useWallet } from '../contexts/WalletContext';
 import { useApp } from '../contexts/AppContext';
+import { useToast } from '../contexts/ToastContext';
+import { fetchUserOptions, exerciseOption, UserOption } from '../utils/optionsFetcher';
 
 const MyOptions: React.FC = () => {
-  const { account, isConnected } = useWallet();
-  const { exerciseOption, loading } = useApp();
+  const { account, isConnected, signer } = useWallet();
+  const { loading } = useApp();
+  const { showToast } = useToast();
   
-  // Mock data for owned options (in a real app, this would come from the blockchain)
-  const [ownedOptions] = useState([
-    {
-      id: 1,
-      underlyingAsset: '0x1234567890123456789012345678901234567890',
-      strikeAsset: '0x0987654321098765432109876543210987654321',
-      strikePrice: '2000000000',
-      expiry: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60, // 7 days from now
-      amount: '1000000000000000000',
-      exercised: false,
-    },
-    {
-      id: 2,
-      underlyingAsset: '0x1234567890123456789012345678901234567890',
-      strikeAsset: '0x0987654321098765432109876543210987654321',
-      strikePrice: '2500000000',
-      expiry: Math.floor(Date.now() / 1000) + 3 * 24 * 60 * 60, // 3 days from now
-      amount: '500000000000000000',
-      exercised: true,
-    },
-  ]);
+  const [ownedOptions, setOwnedOptions] = useState<UserOption[]>([]);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [exercisingOptions, setExercisingOptions] = useState<Set<number>>(new Set());
+  const [exerciseProgress, setExerciseProgress] = useState<{ [key: number]: string }>({});
 
   const formatAddress = (address: string) => {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
   };
 
   const formatAmount = (amount: string) => {
-    return (parseInt(amount) / 1e18).toFixed(4);
+    try {
+      return parseFloat(ethers.formatEther(amount)).toFixed(4);
+    } catch {
+      return '0.0000';
+    }
   };
 
   const formatStrikePrice = (strikePrice: string) => {
-    return (parseInt(strikePrice) / 1e6).toFixed(2);
+    try {
+      return parseFloat(ethers.formatUnits(strikePrice, 6)).toFixed(2);
+    } catch {
+      return '0.00';
+    }
   };
-
-  const handleExercise = async (optionId: number) => {
-    if (!isConnected) {
-      alert('Please connect your wallet to exercise options');
+  
+  const getAssetSymbol = (address: string) => {
+    const addressLower = address.toLowerCase();
+    if (addressLower.includes('610178da') || addressLower.includes('eth')) return 'ETH';
+    if (addressLower.includes('8a791620') || addressLower.includes('usdc')) return 'USDC';
+    return 'Token';
+  };
+  
+  // Fetch user's options when wallet connects
+  const loadUserOptions = async () => {
+    if (!isConnected || !signer || !account) {
+      setOwnedOptions([]);
       return;
     }
-
+    
+    setLoadingOptions(true);
     try {
-      await exerciseOption(optionId);
-      alert('Option exercised successfully!');
-    } catch (err: any) {
-      alert(`Error exercising option: ${err.message}`);
+      console.log('🔄 Loading user options...');
+      const options = await fetchUserOptions(account, signer);
+      setOwnedOptions(options);
+      console.log(`✅ Loaded ${options.length} options`);
+    } catch (error: any) {
+      console.error('❌ Failed to load options:', error);
+      showToast(`Failed to load your options: ${error.message}`, 'error');
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
+  
+  // Load options when wallet connects or changes
+  useEffect(() => {
+    loadUserOptions();
+  }, [isConnected, account, signer]);
+
+  const handleExercise = async (tokenId: number) => {
+    if (!isConnected || !signer) {
+      showToast('Please connect your wallet to exercise options', 'warning');
+      return;
+    }
+    
+    // Prevent multiple simultaneous exercises of the same option
+    if (exercisingOptions.has(tokenId)) {
+      return;
+    }
+    
+    try {
+      // Add option to exercising set
+      setExercisingOptions(prev => new Set(prev).add(tokenId));
+      setExerciseProgress(prev => ({ ...prev, [tokenId]: 'Starting...' }));
+      
+      console.log('🏃‍♂️ Starting to exercise option:', tokenId);
+      
+      const result = await exerciseOption(
+        tokenId,
+        signer,
+        (status: string) => {
+          setExerciseProgress(prev => ({ ...prev, [tokenId]: status }));
+        }
+      );
+      
+      // Success!
+      showToast(`Option exercised successfully! Tx: ${result.txHash.slice(0, 10)}...`, 'success');
+      
+      console.log('🎉 Option exercise completed:', result.txHash);
+      
+      // Refresh options to show updated state
+      await loadUserOptions();
+      
+    } catch (error: any) {
+      console.error('❌ Exercise failed:', error);
+      showToast(`Failed to exercise option: ${error.message}`, 'error');
+    } finally {
+      // Clean up loading state
+      setExercisingOptions(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(tokenId);
+        return newSet;
+      });
+      setExerciseProgress(prev => {
+        const newProgress = { ...prev };
+        delete newProgress[tokenId];
+        return newProgress;
+      });
     }
   };
 
@@ -73,29 +139,45 @@ const MyOptions: React.FC = () => {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-primary">My Options</h2>
-        <div className="text-sm text-text-secondary">
-          Connected: {formatAddress(account!)}
+        <div className="flex items-center space-x-4">
+          <button
+            onClick={loadUserOptions}
+            disabled={loadingOptions}
+            className="btn-secondary text-sm"
+          >
+            {loadingOptions ? 'Loading...' : 'Refresh'}
+          </button>
+          <div className="text-sm text-text-secondary">
+            Connected: {formatAddress(account!)}
+          </div>
         </div>
       </div>
 
-      {ownedOptions.length === 0 ? (
+      {loadingOptions ? (
+        <div className="flex justify-center items-center py-12">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        </div>
+      ) : ownedOptions.length === 0 ? (
         <div className="text-center py-12">
           <div className="text-text-secondary text-lg">
             You don't own any options yet
           </div>
+          <p className="text-sm text-text-secondary mt-2">
+            Buy some options from the "Browse" tab to see them here
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {ownedOptions.map((option) => (
-            <div key={option.id} className="card">
+            <div key={option.tokenId} className="card">
               <div className="space-y-4">
                 <div className="flex justify-between items-start">
                   <div>
                     <h3 className="font-semibold text-primary">
-                      Call Option #{option.id}
+                      Call Option #{option.tokenId}
                     </h3>
                     <p className="text-sm text-text-secondary">
-                      Strike: {formatStrikePrice(option.strikePrice)} USDC
+                      Strike: {formatStrikePrice(option.strikePrice)} {getAssetSymbol(option.strikeAsset)}
                     </p>
                   </div>
                   <div className="text-right">
@@ -119,19 +201,25 @@ const MyOptions: React.FC = () => {
                   <div className="flex justify-between">
                     <span className="text-sm text-text-secondary">Underlying:</span>
                     <span className="text-sm font-medium">
-                      {formatAddress(option.underlyingAsset)}
+                      {getAssetSymbol(option.underlyingAsset)} ({formatAddress(option.underlyingAsset)})
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm text-text-secondary">Strike Asset:</span>
                     <span className="text-sm font-medium">
-                      {formatAddress(option.strikeAsset)}
+                      {getAssetSymbol(option.strikeAsset)} ({formatAddress(option.strikeAsset)})
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm text-text-secondary">Amount:</span>
                     <span className="text-sm font-medium">
-                      {formatAmount(option.amount)} ETH
+                      {formatAmount(option.amount)} {getAssetSymbol(option.underlyingAsset)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-text-secondary">Maker:</span>
+                    <span className="text-sm font-medium">
+                      {formatAddress(option.maker)}
                     </span>
                   </div>
                   <div className="flex justify-between">
@@ -157,13 +245,22 @@ const MyOptions: React.FC = () => {
                     >
                       Expired
                     </button>
+                  ) : exercisingOptions.has(option.tokenId) ? (
+                    <div className="w-full">
+                      <div className="flex items-center justify-center space-x-2 py-2">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                        <span className="text-sm text-text-secondary">
+                          {exerciseProgress[option.tokenId] || 'Processing...'}
+                        </span>
+                      </div>
+                    </div>
                   ) : (
                     <button
-                      onClick={() => handleExercise(option.id)}
+                      onClick={() => handleExercise(option.tokenId)}
                       disabled={loading}
                       className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {loading ? 'Exercising...' : 'Exercise Option'}
+                      Exercise Option
                     </button>
                   )}
                 </div>

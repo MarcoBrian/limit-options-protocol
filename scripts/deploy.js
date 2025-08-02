@@ -56,11 +56,11 @@ async function main() {
   console.log('\n📦 Deploying MockERC20 tokens...');
   const MockERC20 = await hre.ethers.getContractFactory('MockERC20');
   
-  const mockUSDC = await MockERC20.deploy('Mock USDC', 'USDC');
+  const mockUSDC = await MockERC20.deploy('Mock USDC', 'USDC', 6);
   await mockUSDC.waitForDeployment();
   console.log('✅ MockUSDC deployed to:', await mockUSDC.getAddress());
 
-  const mockETH = await MockERC20.deploy('Mock ETH', 'ETH');
+  const mockETH = await MockERC20.deploy('Mock ETH', 'ETH', 18);
   await mockETH.waitForDeployment();
   console.log('✅ MockETH deployed to:', await mockETH.getAddress());
 

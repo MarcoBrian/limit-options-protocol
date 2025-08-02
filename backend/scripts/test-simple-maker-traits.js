@@ -3,7 +3,7 @@ const axios = require('axios');
 require('dotenv').config();
 
 // Import the new envLoader utility
-const { loadContractAddresses } = require('../scripts/utils/envLoader');
+const { loadContractAddresses } = require('../../scripts/utils/envLoader');
 
 // Import builder helper functions
 const {
@@ -11,7 +11,7 @@ const {
   deployDummyOptionToken,
   setupDummyTokensForMaker,
   prepareOrderForFilling
-} = require('../scripts/helpers/orderBuilder');
+} = require('../../scripts/helpers/orderBuilder');
 
 // Import nonce manager helpers
 const { 
@@ -19,7 +19,7 @@ const {
   createPersistentNonceManager,
   createMakerTraitsSimple,
   createRandomNonceManager
-} = require('../scripts/helpers/nonceManager');
+} = require('../../scripts/helpers/nonceManager');
 
 /**
  * Create an options order using the simplified approach

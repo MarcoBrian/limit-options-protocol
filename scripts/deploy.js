@@ -89,7 +89,7 @@ async function main() {
   console.log('\n💰 Minting tokens to deployer...');
   await mockUSDC.mint(deployer.address, hre.ethers.parseUnits('10000', 6)); // 10,000 USDC
   await mockETH.mint(deployer.address, hre.ethers.parseEther('100')); // 100 ETH
-  await dummyToken.mint(deployer.address, hre.ethers.parseEther('1000')); // 1,000 dummy tokens
+  // Note: DummyToken (ERC20True) always returns balance for any address, no minting needed
   console.log('✅ Tokens minted to deployer');
 
   // Setup dummy tokens for maker

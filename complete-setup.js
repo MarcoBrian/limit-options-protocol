@@ -46,10 +46,10 @@ async function completeSetup() {
     const mintAmount = ethers.parseEther("100");
     const usdcMintAmount = ethers.parseUnits("1000000", 6);
     
-    // Mint to maker (needs ETH for collateral, dummy tokens for orders)
+    // Mint to maker (needs ETH for collateral)
     await mockETH.connect(deployer).mint(maker.address, mintAmount);
-    await dummyToken.connect(deployer).mint(maker.address, mintAmount);
-    console.log('   ✅ Minted ETH and dummy tokens to maker');
+    // Note: DummyToken (ERC20True) always returns balance for any address, no minting needed
+    console.log('   ✅ Minted ETH to maker, dummy tokens always available');
     
     // Mint to taker (needs USDC for premiums)
     await mockUSDC.connect(deployer).mint(taker.address, usdcMintAmount);

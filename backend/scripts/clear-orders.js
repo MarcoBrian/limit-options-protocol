@@ -1,4 +1,4 @@
-const { clearOrders } = require('./database/db');
+const { clearOrders } = require('../database/db');
 
 async function clearAllOrders() {
   console.log('🗑️ Clearing all orders from database...');

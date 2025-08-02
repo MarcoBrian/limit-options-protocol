@@ -5,14 +5,14 @@ require('dotenv').config();
 // Import helper functions
 const {
   buildCompleteCallOption
-} = require('../scripts/helpers/orderBuilder');
+} = require('../../scripts/helpers/orderBuilder');
 
 const { 
   createOrderHashManager, 
   createRandomNonceManager
-} = require('../scripts/helpers/nonceManager');
+} = require('../../scripts/helpers/nonceManager');
 
-const { loadContractAddresses } = require('../scripts/utils/envLoader');
+const { loadContractAddresses } = require('../../scripts/utils/envLoader');
 
 /**
  * Create and submit an order to the database

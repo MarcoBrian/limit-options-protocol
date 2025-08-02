@@ -4,7 +4,7 @@ const path = require('path');
 require('dotenv').config();
 
 // Import the new envLoader utility
-const { loadContractAddresses } = require('../scripts/utils/envLoader');
+const { loadContractAddresses } = require('../../scripts/utils/envLoader');
 
 // Import builder helper functions
 const {
@@ -13,7 +13,7 @@ const {
   setupDummyTokensForMaker,
   prepareOrderForFilling,
   buildOptionsNFTInteraction
-} = require('../scripts/helpers/orderBuilder');
+} = require('../../scripts/helpers/orderBuilder');
 
 // Import nonce manager helpers
 const { 
@@ -21,7 +21,7 @@ const {
   createPersistentNonceManager,
   createMakerTraitsSimple,
   createRandomNonceManager
-} = require('../scripts/helpers/nonceManager');
+} = require('../../scripts/helpers/nonceManager');
 
 /**
  * Step-by-step test to fill orders from backend

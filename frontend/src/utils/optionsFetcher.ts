@@ -7,7 +7,16 @@ const OPTIONS_NFT_ABI = [
   "function balanceOf(address owner) external view returns (uint256)",
   "function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)",
   "function options(uint256 tokenId) external view returns (address underlyingAsset, address strikeAsset, address maker, uint256 strikePrice, uint256 expiry, uint256 amount, bool exercised)",
-  "function exerciseOption(uint256 tokenId) external"
+  "function getOption(uint256 optionId) external view returns (tuple(address underlyingAsset, address strikeAsset, address maker, uint256 strikePrice, uint256 expiry, uint256 amount, bool exercised))",
+  "function exercise(uint256 optionId) external"
+];
+
+// ERC20 ABI for token operations
+const ERC20_ABI = [
+  "function balanceOf(address owner) external view returns (uint256)",
+  "function allowance(address owner, address spender) external view returns (uint256)",
+  "function approve(address spender, uint256 amount) external returns (bool)",
+  "function decimals() external view returns (uint8)"
 ];
 
 export interface UserOption {
@@ -120,8 +129,13 @@ export async function exerciseOption(
       signer
     );
     
+    const userAddress = await signer.getAddress();
+    
     // Check if option is still valid
-    const details = await optionsNFT.getOptionDetails(tokenId);
+    console.log('   🔍 Checking option validity...');
+    const details = await optionsNFT.getOption(tokenId);
+    const strikeAsset = details[1];
+    const strikePrice = details[3];
     const expiry = Number(details[4]);
     const exercised = details[6];
     
@@ -134,10 +148,54 @@ export async function exerciseOption(
     }
     
     console.log('   ✅ Option is valid for exercise');
-    onProgress?.('Exercising option...');
+    console.log('   🔍 Strike asset:', strikeAsset);
+    console.log('   🔍 Strike price:', strikePrice.toString());
+    
+    // Check strike asset balance and approval
+    onProgress?.('Checking strike asset balance and approval...');
+    
+    const strikeToken = new ethers.Contract(
+      strikeAsset,
+      ERC20_ABI,
+      signer
+    );
+    
+    // Check balance
+    const balance = await strikeToken.balanceOf(userAddress);
+    console.log('   🔍 User balance:', balance.toString());
+    console.log('   🔍 Required:', strikePrice.toString());
+    
+    if (balance < strikePrice) {
+      const decimals = await strikeToken.decimals();
+      const balanceFormatted = ethers.formatUnits(balance, decimals);
+      const requiredFormatted = ethers.formatUnits(strikePrice, decimals);
+      throw new Error(`Insufficient strike asset balance. You have ${balanceFormatted} but need ${requiredFormatted}`);
+    }
+    
+    // Check approval
+    const allowance = await strikeToken.allowance(userAddress, contractAddresses.optionsNFTAddress);
+    console.log('   🔍 Current allowance:', allowance.toString());
+    
+    if (allowance < strikePrice) {
+      console.log('   ⚠️ Insufficient allowance, requesting approval...');
+      onProgress?.('Approving strike asset for exercise...');
+      
+      // Request approval for the exact strike price needed
+      const approveTx = await strikeToken.approve(contractAddresses.optionsNFTAddress, strikePrice);
+      console.log('   ✅ Approval transaction sent:', approveTx.hash);
+      
+      onProgress?.('Confirming approval...');
+      await approveTx.wait();
+      console.log('   ✅ Strike asset approved for exercise');
+    } else {
+      console.log('   ✅ Sufficient allowance confirmed');
+    }
     
     // Exercise the option
-    const tx = await optionsNFT.exerciseOption(tokenId);
+    console.log('   🎯 Exercising option...');
+    onProgress?.('Exercising option...');
+    
+    const tx = await optionsNFT.exercise(tokenId);
     console.log('   ✅ Exercise transaction sent:', tx.hash);
     
     onProgress?.('Confirming transaction...');
@@ -162,6 +220,12 @@ export async function exerciseOption(
       errorMessage = 'This option has expired and cannot be exercised';
     } else if (error.message?.includes('insufficient funds')) {
       errorMessage = 'Insufficient funds for gas';
+    } else if (error.message?.includes('Insufficient strike asset balance')) {
+      errorMessage = error.message;
+    } else if (error.message?.includes('Strike payment failed')) {
+      errorMessage = 'Strike payment failed - check your token balance and allowance';
+    } else if (error.message?.includes('Asset transfer failed')) {
+      errorMessage = 'Asset transfer failed - the contract may not have the underlying asset';
     }
     
     throw new Error(errorMessage);

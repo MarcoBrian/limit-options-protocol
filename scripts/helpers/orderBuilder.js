@@ -2,8 +2,10 @@ const { ethers } = require("hardhat");
 
 // Helper to encode address as 32-byte left-padded hex string (1inch Address type)
 function toAddressType(addr) {
-  addr = addr.toLowerCase().replace(/^0x/, "");
-  return "0x" + addr.padStart(64, "0");
+  // For ethers.js encoding, we need to use the original address format
+  // The toAddressType function was incorrectly padding to 64 characters
+  // Instead, we should use the standard 20-byte address format
+  return addr.toLowerCase();
 }
 
 // Helper to set maker traits flags similar to SDK pattern
@@ -63,7 +65,12 @@ function calculateTakerTraits(interactionData) {
  * @returns {Object} Parameters ready for fillOrderArgs
  */
 function prepareOrderForFilling(orderData, fillAmount) {
-  const takerTraits = calculateTakerTraits(orderData.interaction.data);
+  // Handle both old object format and new hex string format
+  const interactionData = typeof orderData.interaction === 'string' 
+    ? orderData.interaction 
+    : orderData.interaction.data;
+  
+  const takerTraits = calculateTakerTraits(interactionData);
   
   return {
     orderTuple: orderData.orderTuple,
@@ -71,7 +78,7 @@ function prepareOrderForFilling(orderData, fillAmount) {
     vs: orderData.lopSignature.vs,
     fillAmount: ethers.getBigInt(fillAmount),
     takerTraits: takerTraits,
-    interactionData: orderData.interaction.data
+    interactionData: interactionData
   };
 }
 
@@ -337,23 +344,8 @@ function buildOptionsNFTInteraction(params) {
     interactionData
   ]);
 
-  return {
-    data: fullInteractionData,
-    length: fullInteractionData.length,
-    contractAddress: optionsNFTAddress,
-    decodedData: {
-      maker,
-      underlyingAsset: optionParams.underlyingAsset,
-      strikeAsset: optionParams.strikeAsset,
-      strikePrice: optionParams.strikePrice,
-      expiry: optionParams.expiry,
-      amount: optionParams.optionAmount,
-      salt: signature.salt,  // Using salt instead of nonce
-      v: signature.v,
-      r: signature.r,
-      s: signature.s
-    }
-  };
+  // Return the hex string directly (not an object)
+  return fullInteractionData;
 }
 
 // LOP nonce tracker for testing (can be removed in production)

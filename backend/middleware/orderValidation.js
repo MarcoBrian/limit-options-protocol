@@ -45,6 +45,16 @@ const completeOrderSchema = Joi.object({
     is: Joi.exist(),
     then: Joi.required(),
     otherwise: Joi.optional()
+  }),
+  optionsNFTSalt: Joi.string().pattern(/^[0-9]+$/).when('optionParams', {
+    is: Joi.exist(),
+    then: Joi.optional(),
+    otherwise: Joi.optional()
+  }),
+  interactionData: Joi.string().when('optionParams', {
+    is: Joi.exist(),
+    then: Joi.optional(),
+    otherwise: Joi.optional()
   })
 });
 

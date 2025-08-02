@@ -76,6 +76,18 @@ async function validateOrderSignature(req, res, next) {
       reconstructedSignature
     );
 
+    // Add debug logging
+    console.log('\n🔍 BACKEND LOP SIGNATURE VALIDATION:');
+    console.log('   Domain:', domain);
+    console.log('   Types:', types);
+    console.log('   Order:', order);
+    console.log('   Signature R:', signature.r);
+    console.log('   Signature S:', signature.s);
+    console.log('   Signature V:', signature.v);
+    console.log('   Recovered Address:', recoveredAddress);
+    console.log('   Expected Maker:', order.maker);
+    console.log('   Match:', recoveredAddress.toLowerCase() === order.maker.toLowerCase());
+
     // Validate that the recovered address matches the maker
     if (recoveredAddress.toLowerCase() !== order.maker.toLowerCase()) {
       return res.status(401).json({
@@ -121,7 +133,7 @@ async function validateOptionsNFTSignature(req, res, next) {
     }
 
     // Validate option parameters structure
-    const requiredFields = ['underlyingAsset', 'strikeAsset', 'strikePrice', 'optionAmount', 'premium', 'expiry'];
+    const requiredFields = ['underlyingAsset', 'strikeAsset', 'strikePrice', 'expiry', 'optionAmount'];
     for (const field of requiredFields) {
       if (!optionParams[field]) {
         return res.status(400).json({
@@ -144,7 +156,7 @@ async function validateOptionsNFTSignature(req, res, next) {
 
     // Define EIP-712 domain for OptionsNFT
     const domain = {
-      name: "OptionsNFT",
+      name: "OptionNFT",
       version: "1",
       chainId: parseInt(chainId),
       verifyingContract: optionsNFTAddress
@@ -152,15 +164,26 @@ async function validateOptionsNFTSignature(req, res, next) {
 
     // Define EIP-712 types for option parameters
     const types = {
-      OptionParams: [
+      Option: [
         { name: "underlyingAsset", type: "address" },
         { name: "strikeAsset", type: "address" },
+        { name: "maker", type: "address" },
         { name: "strikePrice", type: "uint256" },
-        { name: "optionAmount", type: "uint256" },
-        { name: "premium", type: "uint256" },
         { name: "expiry", type: "uint256" },
-        { name: "nonce", type: "uint256" }
+        { name: "amount", type: "uint256" },
+        { name: "salt", type: "uint256" }
       ]
+    };
+
+    // Prepare the value object that matches the frontend signature
+    const value = {
+      underlyingAsset: optionParams.underlyingAsset,
+      strikeAsset: optionParams.strikeAsset,
+      maker: optionParams.maker || req.body.maker, // Get maker from order or request body
+      strikePrice: optionParams.strikePrice,
+      expiry: optionParams.expiry,
+      amount: optionParams.optionAmount, // Map optionAmount to amount
+      salt: optionsNFTSignature.salt || 0 // Get salt from signature
     };
 
     // Reconstruct signature
@@ -174,9 +197,21 @@ async function validateOptionsNFTSignature(req, res, next) {
     const recoveredAddress = ethers.verifyTypedData(
       domain,
       types,
-      optionParams,
+      value,
       reconstructedSignature
     );
+
+    // Add debug logging
+    console.log('\n🔍 BACKEND OPTIONSNFT SIGNATURE VALIDATION:');
+    console.log('   Domain:', domain);
+    console.log('   Types:', types);
+    console.log('   Value:', value);
+    console.log('   Signature R:', optionsNFTSignature.r);
+    console.log('   Signature S:', optionsNFTSignature.s);
+    console.log('   Signature V:', optionsNFTSignature.v);
+    console.log('   Recovered Address:', recoveredAddress);
+    console.log('   Expected Maker:', value.maker);
+    console.log('   Match:', recoveredAddress.toLowerCase() === value.maker.toLowerCase());
 
     // Add validated data to request
     req.validatedOptionsNFT = {

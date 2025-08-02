@@ -68,6 +68,11 @@ async function initializeDatabase() {
         order_data TEXT NOT NULL,
         signature TEXT NOT NULL,
         option_params TEXT,
+        options_nft_signature_r TEXT,
+        options_nft_signature_s TEXT,
+        options_nft_signature_v TEXT,
+        options_nft_salt TEXT,
+        interaction_data TEXT,
         status TEXT DEFAULT 'open',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -120,15 +125,19 @@ async function insertOrder(orderData) {
       makerTraits,
       orderData: orderDataObj,
       signature,
-      optionParams
+      optionParams,
+      optionsNFTSignature,
+      optionsNFTSalt,
+      interactionData
     } = orderData;
 
     const query = `
       INSERT INTO orders (
         order_hash, maker, maker_asset, taker_asset, making_amount, 
         taking_amount, salt, receiver, maker_traits, order_data, 
-        signature, option_params
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        signature, option_params, options_nft_signature_r, options_nft_signature_s, options_nft_signature_v,
+        options_nft_salt, interaction_data
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const params = [
@@ -143,7 +152,12 @@ async function insertOrder(orderData) {
       makerTraits,
       JSON.stringify(orderDataObj),
       signature,
-      optionParams ? JSON.stringify(optionParams) : null
+      optionParams ? JSON.stringify(optionParams) : null,
+      optionsNFTSignature?.r || null,
+      optionsNFTSignature?.s || null,
+      optionsNFTSignature?.v || null,
+      optionsNFTSalt || null,
+      interactionData || null
     ];
 
     const executeInsert = (retryCount = 0) => {
@@ -265,14 +279,36 @@ async function deleteOrder(orderHash) {
   return new Promise((resolve, reject) => {
     const database = getDatabase();
     
-    const query = 'DELETE FROM orders WHERE order_hash = ?';
+    const deleteQuery = 'DELETE FROM orders WHERE order_hash = ?';
     
-    database.run(query, [orderHash], function(err) {
+    database.run(deleteQuery, [orderHash], function(err) {
       if (err) {
+        console.error('Error deleting order:', err);
         reject(err);
-      } else {
-        resolve({ changes: this.changes });
+        return;
       }
+      
+      console.log(`✅ Order deleted: ${orderHash}`);
+      resolve({ deleted: this.changes > 0 });
+    });
+  });
+}
+
+async function clearOrders() {
+  return new Promise((resolve, reject) => {
+    const database = getDatabase();
+    
+    const clearQuery = 'DELETE FROM orders';
+    
+    database.run(clearQuery, function(err) {
+      if (err) {
+        console.error('Error clearing orders:', err);
+        reject(err);
+        return;
+      }
+      
+      console.log(`✅ Cleared ${this.changes} orders from database`);
+      resolve({ cleared: this.changes });
     });
   });
 }
@@ -304,5 +340,6 @@ module.exports = {
   getOrderByHash,
   updateOrderStatus,
   deleteOrder,
+  clearOrders,
   closeDatabase
 }; 

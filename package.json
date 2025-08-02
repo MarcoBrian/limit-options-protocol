@@ -14,13 +14,18 @@
     "debug:backend": "node backend/debug-backend.js",
     "start": "node backend/server.js",
     "dev": "nodemon backend/server.js",
-    "test:relayer": "node backend/test/test-relayer.js"
+    "test:relayer": "node backend/test/test-relayer.js",
+    "frontend": "cd frontend && npm start",
+    "dev:full": "concurrently \"npm run dev\" \"npm run frontend\"",
+    "setup:frontend-env": "node scripts/setup-frontend-env.js",
+    "deploy": "npx hardhat run scripts/deploy.js --network localhost"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "concurrently": "^9.2.0",
     "hardhat": "^2.26.1",
     "hardhat-preprocessor": "^0.1.5",
     "nodemon": "^3.1.10"

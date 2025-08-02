@@ -1,17 +1,38 @@
-# Options Protocol Relayer Backend
+# 1option Backend Service
 
-A Node.js backend service for the Options Protocol built on top of 1inch Limit Order Protocol. This relayer handles order storage, validation, and provides pre-packed calldata for order execution.
+> Node.js relayer service for the 1option Protocol, providing order management and settlement coordination
 
-## Features
+[![Node.js](https://img.shields.io/badge/Node.js-v16+-green.svg)](https://nodejs.org/)
+[![Express](https://img.shields.io/badge/Express-4.x-lightgrey.svg)](https://expressjs.com/)
+[![SQLite](https://img.shields.io/badge/SQLite-3.x-blue.svg)](https://sqlite.org/)
 
-- **REST API** for order management
-- **EIP-712 signature validation** for secure order submission
-- **SQLite database** for off-chain order storage
-- **Rate limiting** and security middleware
-- **Integration** with existing builder helper functions
-- **Pre-packed calldata generation** for frontend integration
+## Table of Contents
 
-## API Endpoints
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [API Reference](#api-reference)
+- [Setup & Installation](#setup--installation)
+- [Configuration](#configuration)
+- [Security](#security)
+- [Database](#database)
+- [Testing](#testing)
+- [Deployment](#deployment)
+
+## Overview
+
+The 1option Backend Service is a Node.js relayer that handles off-chain order management for the options protocol. It provides secure order storage, validation, and generates pre-packed calldata for efficient on-chain execution using the 1inch Limit Order Protocol as the settlement layer.
+
+## Key Features
+
+- **RESTful API** - Complete order lifecycle management
+- **EIP-712 Signature Validation** - Cryptographic security for all orders
+- **SQLite Database** - Reliable off-chain order storage
+- **Rate Limiting** - Protection against abuse and spam
+- **Security Middleware** - Comprehensive protection stack
+- **Builder Integration** - Seamless integration with helper functions
+- **Calldata Generation** - Pre-packed transaction data for frontends
+
+## API Reference
 
 ### POST `/api/orders`
 Submit a signed option order to the relayer.
@@ -179,26 +200,36 @@ Cancel an order (mark as cancelled).
 }
 ```
 
-## Setup
+## Setup & Installation
+
+### Prerequisites
+
+- **Node.js** v16 or higher
+- **npm** or **yarn**
+- **SQLite3** (included with Node.js)
+
+### Quick Start
 
 ### 1. Install Dependencies
 ```bash
 npm install
 ```
 
-### 2. Environment Configuration
-Copy the example environment file and configure your settings:
+### 2. Environment Setup
+
+Create and configure your environment file:
+
 ```bash
 cp env.example .env
 ```
 
-Edit `.env` with your configuration:
+**Environment Configuration:**
 ```env
 # Server Configuration
 PORT=3000
 NODE_ENV=development
 
-# Database Configuration
+# Database Configuration  
 DATABASE_PATH=./data/orders.db
 
 # Blockchain Configuration
@@ -218,52 +249,67 @@ ENABLE_CONSOLE_LOG=true
 ENABLE_FILE_LOG=false
 ```
 
-### 3. Create Data Directory
+### 3. Initialize Database
+
 ```bash
 mkdir -p data
 ```
 
-### 4. Start the Server
+### 4. Start the Service
+
 ```bash
-# Development mode with auto-restart
+# Development mode (with auto-restart)
 npm run dev
 
 # Production mode
 npm start
 ```
 
+**The service will be available at `http://localhost:3000`**
+
 ## Configuration
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PORT` | Server port | `3000` |
-| `NODE_ENV` | Environment mode | `development` |
-| `DATABASE_PATH` | SQLite database path | `./data/orders.db` |
-| `CHAIN_ID` | Blockchain chain ID | `1` |
-| `RPC_URL` | Ethereum RPC URL | `http://localhost:8545` |
-| `LOP_ADDRESS` | LOP contract address | Required |
-| `OPTIONS_NFT_ADDRESS` | OptionsNFT contract address | Required |
-| `RATE_LIMIT_WINDOW_MS` | Rate limit window (ms) | `900000` |
-| `RATE_LIMIT_MAX` | Max requests per window | `100` |
-| `CORS_ORIGIN` | CORS origin | `*` |
-| `LOG_LEVEL` | Logging level | `info` |
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `PORT` | Server port | `3000` | No |
+| `NODE_ENV` | Environment mode (`development`, `production`) | `development` | No |
+| `DATABASE_PATH` | SQLite database file path | `./data/orders.db` | No |
+| `CHAIN_ID` | Blockchain network chain ID | `1` | No |
+| `RPC_URL` | Ethereum RPC endpoint URL | `http://localhost:8545` | No |
+| `LOP_ADDRESS` | 1inch Limit Order Protocol contract address | - | **Yes** |
+| `OPTIONS_NFT_ADDRESS` | Options NFT contract address | - | **Yes** |
+| `RATE_LIMIT_WINDOW_MS` | Rate limiting time window (milliseconds) | `900000` | No |
+| `RATE_LIMIT_MAX` | Maximum requests per time window | `100` | No |
+| `CORS_ORIGIN` | CORS allowed origins | `*` | No |
+| `LOG_LEVEL` | Logging verbosity (`error`, `warn`, `info`, `debug`) | `info` | No |
+| `ENABLE_CONSOLE_LOG` | Enable console logging | `true` | No |
+| `ENABLE_FILE_LOG` | Enable file logging | `false` | No |
 
-## Security Features
+## Security
 
-- **EIP-712 Signature Validation**: All orders must be properly signed
-- **Rate Limiting**: Prevents abuse with configurable limits
-- **Input Validation**: Comprehensive request validation using Joi
-- **CORS Protection**: Configurable cross-origin resource sharing
-- **Helmet Security**: HTTP security headers
-- **SQL Injection Protection**: Parameterized queries
+The backend implements multiple layers of security:
 
-## Database Schema
+### Cryptographic Security
+- **EIP-712 Signature Validation** - All orders cryptographically verified
+- **Order Hash Verification** - Prevents tampering and replay attacks
 
-### Orders Table
+### Network Security  
+- **Rate Limiting** - Configurable request throttling (100 req/15min default)
+- **CORS Protection** - Cross-origin resource sharing controls
+- **HTTP Security Headers** - Helmet.js security middleware
+
+### Data Security
+- **Input Validation** - Comprehensive request validation using Joi schemas
+- **SQL Injection Protection** - Parameterized queries and prepared statements
+- **Data Sanitization** - All inputs sanitized before processing
+
+## Database
+
+### Orders Table Schema
 ```sql
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   order_hash TEXT UNIQUE NOT NULL,
   maker TEXT NOT NULL,
@@ -277,24 +323,53 @@ CREATE TABLE orders (
   order_data TEXT NOT NULL,
   signature TEXT NOT NULL,
   option_params TEXT,
+  options_nft_signature_r TEXT,
+  options_nft_signature_s TEXT,
+  options_nft_signature_v TEXT,
+  options_nft_salt TEXT,
+  interaction_data TEXT,
   status TEXT DEFAULT 'open',
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
+### Field Descriptions
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | INTEGER | Auto-incrementing primary key |
+| `order_hash` | TEXT | Unique EIP-712 order hash |
+| `maker` | TEXT | Order maker's address |
+| `maker_asset` | TEXT | Asset being offered by maker |
+| `taker_asset` | TEXT | Asset requested by maker |
+| `making_amount` | TEXT | Amount of maker asset |
+| `taking_amount` | TEXT | Amount of taker asset |
+| `salt` | TEXT | Unique salt for order |
+| `receiver` | TEXT | Address to receive taker asset |
+| `maker_traits` | TEXT | Encoded maker preferences |
+| `order_data` | TEXT | JSON serialized complete order object |
+| `signature` | TEXT | JSON serialized EIP-712 signature |
+| `option_params` | TEXT | JSON serialized option parameters |
+| `options_nft_signature_r` | TEXT | Options NFT signature R component |
+| `options_nft_signature_s` | TEXT | Options NFT signature S component |
+| `options_nft_signature_v` | TEXT | Options NFT signature V component |
+| `options_nft_salt` | TEXT | Salt for Options NFT minting |
+| `interaction_data` | TEXT | Additional interaction calldata |
+| `status` | TEXT | Order status (`open`, `filled`, `cancelled`, `expired`) |
+| `created_at` | DATETIME | Order creation timestamp |
+| `updated_at` | DATETIME | Last update timestamp |
+
 ## Integration with Builder Helpers
 
 The relayer integrates with existing builder helper functions:
 
 ```javascript
-// Using the builder helpers in the backend
 const {
   buildCompleteCallOption,
   fillCallOption
 } = require('../../scripts/helpers/orderBuilder');
 
-// Generate fill calldata for options orders
 const fillCalldata = await generateOptionsFillCalldata({
   orderData,
   taker,
@@ -303,14 +378,18 @@ const fillCalldata = await generateOptionsFillCalldata({
 });
 ```
 
-## 🧪 Testing
+## Testing
 
 ### Health Check
+
+Verify the service is running:
 ```bash
 curl http://localhost:3000/health
 ```
 
-### Submit Order
+### API Testing
+
+**Submit a test order:**
 ```bash
 curl -X POST http://localhost:3000/api/orders \
   -H "Content-Type: application/json" \
@@ -321,46 +400,29 @@ curl -X POST http://localhost:3000/api/orders \
   }'
 ```
 
-### Get Orders
+**Retrieve orders:**
 ```bash
 curl http://localhost:3000/api/orders?status=open&limit=10
 ```
 
-## Deployment
-
-### Development
+**Get specific order:**
 ```bash
-npm run dev
+curl http://localhost:3000/api/orders/0x[orderHash]
 ```
 
-### Production
-```bash
-npm start
-```
+## Monitoring & Logs
 
-### Docker (Optional)
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-EXPOSE 3000
-CMD ["npm", "start"]
-```
+### Service Health
+- **Health endpoint:** `GET /health`
+- **Database status** in application logs
+- **Rate limiting** headers in API responses
 
-## Logs
+### Logging Features
+- Order submission and validation events
+- Database operation logging
+- Error tracking and debugging
+- Performance metrics and timing
 
-The server provides comprehensive logging:
-- Order submissions and validations
-- Database operations
-- Error tracking
-- Performance metrics
+---
 
-## Monitoring
-
-Monitor the relayer with:
-- Health check endpoint: `GET /health`
-- Database status in logs
-- Rate limit headers in responses
-- Error tracking in console
+**For additional setup information, see the main project [README](../README.md)**

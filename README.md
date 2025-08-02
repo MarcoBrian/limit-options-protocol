@@ -1,79 +1,96 @@
-# Options Enabled on Limit Order Protocol
-
-IWantOptions is a decentralized, permissionless protocol that allows anyone to mint, buy, and exercise covered call options built on top of the 1inch Limit Order Protocol as a settlement layer. It leverages off-chain signatures, on-chain NFT minting, and tokenized collateral to create a new class of decentralized financial derivatives — without relying on a traditional order book model.
+# Project Overview - 1option Protocol
 
 
-# ✅ Project To-Do List
+> A decentralized, permissionless protocol for options built on the 1inch Limit Order Protocol
 
-## Smart Contracts
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Hardhat](https://img.shields.io/badge/Built%20with-Hardhat-FFDB1C.svg)](https://hardhat.org/)
+[![1inch](https://img.shields.io/badge/Built%20on-1inch%20LOP-00D2FF.svg)](https://1inch.io/)
 
-- [x] Write `OptionNFT` contract with ERC721Enumerable
-- [x] Implement `notifyInteraction()` with EIP-712 signature verification
-- [ ] Handle `permit()` logic for gasless approval
-- [x] Enforce replay protection with hash tracking (`usedHashes`)
-- [x] Add `exercise()` function for takers to claim collateral
-- [x] Restrict `notifyInteraction()` to only be callable by LOP
-- [ ] (Optional) Add `cancel()` or `revoke()` logic for makers
-- [ ] (Optional) Add `withdrawUnmintedCollateral()` if orders are cancelled
+![1option banner](banner.png)
 
----
+## Table of Contents
 
-## Backend / Relayer
+- [Overview](#-overview)
+- [Key Features](#-key-features)
+- [Architecture](#-architecture)
+- [Prerequisites](#-prerequisites)
+- [Quick Start](#-quick-start)
+- [Development Setup](#-development-setup)
+- [Project Structure](#-project-structure)
+- [Contributing](#-contributing)
 
-- [ ] Set up Node.js or Python backend with REST or GraphQL API
-- [ ] Create `/orders` endpoint to accept signed option orders
-- [ ] Store off-chain orders in DB (e.g., PostgreSQL, Redis, or in-memory)
-- [ ] Validate EIP-712 signature before accepting order
-- [ ] Serve GET `/orders` endpoint for takers to browse open options
-- [ ] Return pre-packed `interaction` calldata to frontend
+## Overview
 
----
+**1option** is a decentralized, permissionless protocol that allows anyone to mint, buy, and exercise call options built on top of the 1inch Limit Order Protocol as a settlement layer. It leverages off-chain signatures, on-chain NFT minting, and tokenized collateral to create a new class of decentralized financial derivatives , without relying on a traditional order book model.
 
-## Testing
+## Key Features
 
-- [ ] Write unit tests for:
-  - Option minting via `notifyInteraction()`
-  - Invalid signature rejection
-  - permit() fallback and approval
-  - Option exercising logic
-  - Expiry enforcement
-- [ ] Set up Hardhat mainnet fork test using real tokens (USDC, WETH)
-- [ ] Write Foundry fuzz tests (optional)
-- [ ] Deploy to local devnet (Anvil/Hardhat) for end-to-end simulation
+- **Decentralized Options Trading** - No centralized intermediaries
+- **Collateralized Positions** - Fully backed by tokenized collateral  
+- **Off-Chain Signatures** - Gas-efficient order matching
+- **NFT-Based Options** - Each option is a unique NFT
+- **1inch Integration** - Built on battle-tested infrastructure
+- **Permissionless** - Anyone can participate
 
----
+## Architecture
 
-## Frontend (Maker / Taker / Exerciser UI)
+The protocol consists of three main components:
 
-### Maker Flow
-- [ ] Form to enter option parameters (underlying, strike, expiry, etc.)
-- [ ] Sign EIP-712 `Option` struct using wallet
-- [ ] Submit signed data to relayer backend
+- **Smart Contracts** - Core protocol logic and NFT minting
+- **Backend API** - Order management and matching
+- **Frontend Interface** - User-friendly trading interface
 
-### Taker Flow
-- [ ] Browse available options from relayer API
-- [ ] Preview NFT details and option metadata
-- [ ] Fill order on-chain using LOP `fillOrder()`
+## Development Setup
 
-### Exerciser Flow
-- [ ] View owned option NFTs via `OptionNFT.tokenOfOwnerByIndex()`
-- [ ] “Exercise” button to trigger `exercise(optionId)`
-- [ ] Notify success or expiry failure
+### Step 1: Clone & Install Dependencies
 
----
+```bash
+# Clone repository
+git clone <repository-url>
+cd limit-options-protocol
 
-## Deployment
+npm install
+```
 
-- [ ] Deploy `OptionNFT` contract to testnet
-- [ ] Deploy relayer backend (Vercel, Fly.io, Heroku, etc.)
-- [ ] Hook frontend to target deployed contracts and backend endpoints
-- [ ] Write deployment docs / runbooks
-- [ ] Deploy to mainnet (after testnet validation)
+### Step 2: Start Local Blockchain
+```bash
+npx hardhat node
+```
 
----
+### Step 3: Deploy Smart Contracts
+```bash
+npm run deploy
+```
 
-## Additional Extensions
+### Step 4: Configure Frontend Environment
+```bash
+npm run setup:frontend-env
+```
 
-- [ ] Add `predicate` to enforce time-based conditions
-- [ ] Support secondary resale of Option NFTs on marketplaces (e.g., OpenSea)
-- [ ] Support put options (strikeAsset as collateral)
+### Step 5: Initialize Demo Data
+```bash
+npx hardhat run complete-setup.js --network localhost
+```
+
+### Step 6: Start Backend Server
+```bash
+npm start
+```
+
+### Step 7: Launch Frontend Application
+```bash
+npm run frontend
+```
+
+## 📁 Project Structure
+
+```
+limit-options-protocol/
+├── contracts/          # Solidity Smart contracts
+├── frontend/           # React frontend application
+├── backend/            # Node.js API server + Database
+├── scripts/            # Deployment and utility scripts
+├── test/               # Test files
+└── external/           # External dependencies (1inch Limit Order Protocol contracts for local deployment)
+```

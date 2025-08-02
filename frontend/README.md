@@ -1,23 +1,28 @@
-# Options Protocol Frontend
+# 1Option Frontend
 
-A modern React frontend for the Options Protocol built on top of 1inch Limit Order Protocol.
+A modern React frontend for 1option.
 
 ## Features
 
-- **MetaMask Integration**: Connect wallet and sign transactions
-- **Maker Flow**: Create and sell options with form-based interface
-- **Taker Flow**: Browse and buy options with marketplace-style grid
-- **Exerciser Flow**: View and exercise owned options
-- **Modern UI**: Built with Tailwind CSS and responsive design
+- **MetaMask Integration**: Connect wallet and sign transactions seamlessly
+- **Maker Flow**: Create and sell options with comprehensive form-based interface
+- **Taker Flow**: Browse and buy options with marketplace-style grid and filtering
+- **Exerciser Flow**: View and exercise owned options with real-time status
+- **Modern UI**: Built with Tailwind CSS and fully responsive design
 - **Real-time Updates**: Automatic order refresh and status updates
+- **Toast Notifications**: User-friendly feedback system for all actions
+- **Asset Management**: Sophisticated asset configuration with underlying and strike assets
+- **Advanced Order Management**: Full EIP-712 signature support and order building
+- **Smart Contract Integration**: Direct integration with deployed contracts
 
 ## Tech Stack
 
 - **React 18** with TypeScript
-- **Tailwind CSS** for styling
-- **Ethers.js** for Web3 integration
-- **Axios** for API communication
-- **React Context** for state management
+- **Tailwind CSS** for styling with custom design system
+- **Ethers.js v6** for Web3 integration
+- **Axios** for API communication with interceptors
+- **React Context** for state management (Wallet, App, Toast)
+- **Advanced Utilities**: Order building, filling, nonce management, and formatters
 
 ## Getting Started
 
@@ -41,17 +46,30 @@ cp .env.example .env
 
 3. Configure environment variables:
 ```env
+# API Configuration
 REACT_APP_API_URL=http://localhost:3000
+
+# Smart Contract Addresses (set after deployment)
+REACT_APP_LOP_ADDRESS=0x...
+REACT_APP_OPTIONS_NFT_ADDRESS=0x...
+REACT_APP_DUMMY_TOKEN_ADDRESS=0x...
+REACT_APP_MOCK_USDC_ADDRESS=0x...
+REACT_APP_MOCK_ETH_ADDRESS=0x...
+
+# Network Configuration
+REACT_APP_CHAIN_ID=31337
+REACT_APP_RPC_URL=http://localhost:8545
+REACT_APP_NETWORK=localhost
 ```
 
 ### Development
 
 Start the development server:
 ```bash
-npm start
+npm run frontend
 ```
 
-The app will be available at `http://localhost:3000`
+The app will be available at `http://localhost:3001`
 
 ### Building for Production
 
@@ -96,44 +114,38 @@ npm run build
 ```
 src/
 ├── components/          # React components
-│   ├── Header.tsx     # Navigation and wallet connection
-│   ├── MakerForm.tsx  # Option creation form
-│   ├── OrderGrid.tsx  # Marketplace grid
-│   └── MyOptions.tsx  # User's owned options
-├── contexts/           # React contexts
-│   ├── WalletContext.tsx  # MetaMask integration
-│   └── AppContext.tsx     # Application state
-├── services/           # API services
-│   └── api.ts         # Backend communication
-├── types/              # TypeScript definitions
-│   └── index.ts       # Interface definitions
-└── App.tsx            # Main application component
+│   ├── Header.tsx      # Navigation and wallet connection
+│   ├── MakerForm.tsx   # Option creation form with validation
+│   ├── OrderGrid.tsx   # Marketplace grid with filtering
+│   ├── MyOptions.tsx   # User's owned options management
+│   ├── AssetSelector.tsx # Asset selection dropdown
+│   └── Toast.tsx       # Notification toast component
+├── contexts/            # React contexts
+│   ├── WalletContext.tsx   # MetaMask integration and wallet state
+│   ├── AppContext.tsx      # Application state management
+│   └── ToastContext.tsx    # Toast notification system
+├── config/              # Configuration files
+│   ├── assets.ts       # Asset definitions (underlying/strike assets)
+│   └── contracts.ts    # Smart contract addresses and network config
+├── services/            # API services
+│   └── api.ts          # Backend communication with interceptors
+├── types/               # TypeScript definitions
+│   └── index.ts        # Interface definitions for orders, assets, etc.
+├── utils/               # Utility functions
+│   ├── orderBuilder.ts # EIP-712 order building and signing
+│   ├── orderFiller.ts  # Order filling logic
+│   ├── optionsFetcher.ts # Options data fetching utilities
+│   ├── nonceManager.ts # Nonce management for orders
+│   └── formatters.ts   # Data formatting utilities
+└── App.tsx             # Main application component
 ```
 
 ## API Integration
 
 The frontend communicates with the backend via REST API:
 
-- `GET /api/orders` - Fetch available options
-- `POST /api/orders` - Submit new option order
-- `GET /health` - Health check
+- `GET /api/orders` - Fetch available options with optional filtering
+  - Query parameters: `status`, `maker`, `makerAsset`, `takerAsset`, `limit`
+- `POST /api/orders` - Submit new option order with full validation
+- `GET /health` - Health check endpoint
 
-## Development Notes
-
-- Mock data is used for some features (MyOptions component)
-- EIP-712 signature generation needs to be implemented
-- Smart contract integration for option exercise needs to be added
-- Error handling and loading states are implemented
-- Responsive design for desktop focus
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## License
-
-ISC

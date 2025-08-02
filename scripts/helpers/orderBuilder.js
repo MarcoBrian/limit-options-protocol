@@ -22,8 +22,9 @@ function setMakerTraits(flags = {}, nonce = 0) {
   if (flags.noPartialFills) {
     traits |= (1n << 255n); // NO_PARTIAL_FILLS_FLAG
   }
-  if (flags.allowMultipleFills) {
-    traits |= (1n << 254n); // ALLOW_MULTIPLE_FILLS_FLAG
+  // FIX: Match frontend logic - set flag when allowMultipleFills is false
+  if (flags.allowMultipleFills === false) {
+    traits |= (1n << 254n); // ALLOW_MULTIPLE_FILLS_FLAG (inverted logic)
   }
   if (flags.preInteraction) {
     traits |= (1n << 252n); // PRE_INTERACTION_CALL_FLAG
@@ -230,6 +231,7 @@ function buildCallOptionOrder(params) {
   // Default maker traits with no partial fills
   const defaultMakerTraits = {
     noPartialFills: true,
+    allowMultipleFills: false, // Match frontend: disable multiple fills
     ...makerTraits
   };
 
@@ -310,20 +312,116 @@ async function signOptionsNFT(optionParams, signer, optionsNFTAddress, salt = nu
 }
 
 /**
+ * Generate EIP-2612 permit signature for gasless approval
+ * @param {Object} params - Permit parameters
+ * @param {Object} params.signer - Signer object
+ * @param {string} params.tokenAddress - ERC20 token address
+ * @param {string} params.spender - Spender address (OptionsNFT contract)
+ * @param {string|BigInt} params.value - Amount to permit
+ * @param {number} params.deadline - Permit deadline timestamp
+ * @returns {Object} Permit signature {v, r, s, deadline}
+ */
+async function generatePermitSignature(params) {
+  const { signer, tokenAddress, spender, value, deadline } = params;
+  
+  try {
+    const token = await ethers.getContractAt("IERC20Permit", tokenAddress);
+    
+    // Get token details for EIP-712 domain
+    let name;
+    try {
+      name = await token.name();
+      console.log(`   📝 Token name: ${name}`);
+    } catch (error) {
+      // If name() fails, try to get it from the contract deployment
+      console.log(`   ⚠️  Token name() failed, trying to determine name from address...`);
+      
+      // For our MockERC20 tokens, we know the names from deployment
+      if (tokenAddress.toLowerCase() === process.env.MOCK_ETH_ADDRESS?.toLowerCase()) {
+        name = "Mock ETH";
+      } else if (tokenAddress.toLowerCase() === process.env.MOCK_USDC_ADDRESS?.toLowerCase()) {
+        name = "Mock USDC";
+      } else {
+        // For unknown tokens, use a generic name that works with EIP-712
+        name = "ERC20 Token";
+      }
+      console.log(`   📝 Using fallback name: ${name}`);
+    }
+    
+    const [version, chainId, nonces] = await Promise.all([
+      Promise.resolve("1"), // Most tokens use version "1"
+      ethers.provider.getNetwork().then(n => n.chainId),
+      token.nonces(await signer.getAddress())
+    ]);
+
+    // EIP-712 domain
+    const domain = {
+      name,
+      version,
+      chainId,
+      verifyingContract: tokenAddress
+    };
+
+    // EIP-712 types
+    const types = {
+      Permit: [
+        { name: 'owner', type: 'address' },
+        { name: 'spender', type: 'address' },
+        { name: 'value', type: 'uint256' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'deadline', type: 'uint256' }
+      ]
+    };
+
+    // EIP-712 message
+    const message = {
+      owner: await signer.getAddress(),
+      spender,
+      value: ethers.getBigInt(value),
+      nonce: nonces,
+      deadline
+    };
+
+    // Sign the permit
+    const signature = await signer.signTypedData(domain, types, message);
+    const { r, s, v } = ethers.Signature.from(signature);
+
+    return { v, r, s, deadline };
+  } catch (error) {
+    console.warn("Permit signature generation failed:", error);
+    return null;
+  }
+}
+
+/**
  * Build interaction data for OptionsNFT
  * @param {Object} params - Interaction parameters
  * @param {string} params.maker - Maker address
  * @param {Object} params.optionParams - Option parameters
  * @param {Object} params.signature - OptionsNFT signature
  * @param {string} params.optionsNFTAddress - OptionsNFT contract address
+ * @param {Object} params.permitSignature - Optional permit signature
  * @returns {Object} Interaction data
  */
 function buildOptionsNFTInteraction(params) {
-  const { maker, optionParams, signature, optionsNFTAddress } = params;
+  const { maker, optionParams, signature, optionsNFTAddress, permitSignature } = params;
 
-  // Encode interaction data: maker, optionParams, signature components
+  // Prepare permit data
+  const usePermit = permitSignature !== null && permitSignature !== undefined;
+  const permitDeadline = usePermit ? permitSignature.deadline : 0;
+  const permitV = usePermit ? permitSignature.v : 0;
+  const permitR = usePermit ? permitSignature.r : ethers.ZeroHash;
+  const permitS = usePermit ? permitSignature.s : ethers.ZeroHash;
+
+  console.log('🔧 Building OptionsNFT interaction data...');
+  console.log(`   📋 Use permit: ${usePermit}`);
+  if (usePermit) {
+    console.log(`   ⏰ Permit deadline: ${new Date(permitDeadline * 1000).toLocaleString()}`);
+  }
+
+  // Encode interaction data: maker, optionParams, signature components, permit data
   const interactionData = ethers.AbiCoder.defaultAbiCoder().encode(
-    ["address", "address", "address", "uint256", "uint256", "uint256", "uint256", "uint8", "bytes32", "bytes32"],
+    ["address", "address", "address", "uint256", "uint256", "uint256", "uint256", "uint8", "bytes32", "bytes32", "bool", "uint256", "uint8", "bytes32", "bytes32"],
     [
       maker,
       optionParams.underlyingAsset,
@@ -334,7 +432,13 @@ function buildOptionsNFTInteraction(params) {
       signature.salt,  // Using salt instead of nonce
       signature.v,
       signature.r,
-      signature.s
+      signature.s,
+      // Permit signature data
+      usePermit,
+      permitDeadline,
+      permitV,
+      permitR,
+      permitS
     ]
   );
 
@@ -343,6 +447,8 @@ function buildOptionsNFTInteraction(params) {
     optionsNFTAddress,
     interactionData
   ]);
+
+  console.log('   ✅ Interaction data built successfully');
 
   // Return the hex string directly (not an object)
   return fullInteractionData;
@@ -494,12 +600,26 @@ async function buildCompleteCallOption(params) {
     finalSalt
   );
 
-  // 4. Build interaction data
+  // 4. Generate permit signature (deadline = option expiry)
+  let permitSignature = null;
+  if (params.usePermit !== false) { // Default to true unless explicitly disabled
+    const permitDeadline = expiry; // Use option expiry as permit deadline
+    permitSignature = await generatePermitSignature({
+      signer: makerSigner,
+      tokenAddress: underlyingAsset,
+      spender: optionsNFTAddress,
+      value: optionAmount,
+      deadline: permitDeadline
+    });
+  }
+
+  // 5. Build interaction data
   const interaction = buildOptionsNFTInteraction({
     maker: makerSigner.address,
     optionParams: orderResult.optionParams,
     signature: optionsNFTSignature,
-    optionsNFTAddress
+    optionsNFTAddress,
+    permitSignature
   });
 
   return {
@@ -509,6 +629,7 @@ async function buildCompleteCallOption(params) {
     optionParams: orderResult.optionParams,
     lopSignature,
     optionsNFTSignature,
+    permitSignature,  // Include permit signature
     interaction,
     salt: finalSalt,  // Return salt instead of nonce
     lopNonce: orderResult.lopNonce
@@ -607,6 +728,7 @@ module.exports = {
   buildTakerTraits,
   calculateTakerTraits,  // NEW: Helper to calculate taker traits
   prepareOrderForFilling,  // NEW: Prepare order for filling
+  generatePermitSignature,  // NEW: Generate permit signatures
   getNextLopNonce,
   resetLopNonce,
   generateUniqueSalt,

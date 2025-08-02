@@ -69,17 +69,17 @@ async function completeSetup() {
     console.log('\n🔍 Step 6: Verifying setup...');
     const makerETH = await mockETH.balanceOf(maker.address);
     const takerUSDC = await mockUSDC.balanceOf(taker.address);
-    const ethApproval = await mockETH.allowance(maker.address, process.env.OPTIONS_NFT_ADDRESS);
+    // const ethApproval = await mockETH.allowance(maker.address, process.env.OPTIONS_NFT_ADDRESS);
     
     console.log('   Maker ETH balance:', ethers.formatEther(makerETH));
     console.log('   Taker USDC balance:', ethers.formatUnits(takerUSDC, 6));
-    console.log('   ETH approval to OptionsNFT:', ethers.formatEther(ethApproval));
+    // console.log('   ETH approval to OptionsNFT:', ethers.formatEther(ethApproval));
     
-    if (ethApproval > 0) {
-      console.log('\n🎉 SUCCESS! All approvals are set correctly!');
-      console.log('💡 The maker can now provide ETH collateral when options are bought');
-      console.log('💡 You can now create and buy options without balance errors');
-    }
+    // if (ethApproval > 0) {
+    //   console.log('\n🎉 SUCCESS! All approvals are set correctly!');
+    //   console.log('💡 The maker can now provide ETH collateral when options are bought');
+    //   console.log('💡 You can now create and buy options without balance errors');
+    // }
     
   } catch (error) {
     console.error('❌ Setup failed:', error.message);

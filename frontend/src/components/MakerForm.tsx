@@ -141,7 +141,8 @@ const MakerForm: React.FC = () => {
         lopAddress: contractAddresses.lopAddress,
         optionsNFTAddress: contractAddresses.optionsNFTAddress,
         salt: salt, // Don't convert to Number() to avoid overflow
-        lopNonce: lopNonce // Use small test nonce
+        lopNonce: lopNonce, // Use small test nonce
+        usePermit: true // NEW: Enable gasless permit functionality
       });
 
       // Convert to OrderSubmission format (now uses proper salt and lopNonce from backend approach)
@@ -181,7 +182,13 @@ const MakerForm: React.FC = () => {
       };
 
       await submitOrder(orderSubmission);
-      showToast('Order submitted successfully!', 'success');
+      
+      // Show permit-specific success message
+      if (orderData.permitSignature) {
+        showToast('Order submitted with gasless approval! 🎉 No manual approval needed.', 'success');
+      } else {
+        showToast('Order submitted successfully! Note: Manual approval will be required when order is filled.', 'success');
+      }
       
       // Reset form
       setFormData({

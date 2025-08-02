@@ -173,13 +173,23 @@ router.post('/:orderHash/fill', validateOrderHash, async (req, res) => {
     const { orderHash } = req.params;
     const { taker, fillAmount, lopAddress } = req.body;
     
+    console.log('🔍 [DEBUG] Fill request received:', {
+      orderHash,
+      taker,
+      fillAmount,
+      lopAddress
+    });
+    
     // Validate required fields
     if (!taker || !fillAmount || !lopAddress) {
+      console.log('❌ [DEBUG] Missing required fields:', { taker, fillAmount, lopAddress });
       return res.status(400).json({
         error: 'Missing required fields',
         message: 'taker, fillAmount, and lopAddress are required'
       });
     }
+    
+    console.log('✅ [DEBUG] Required fields validated');
     
     // Get the order from database
     const order = await getOrderByHash(orderHash);
@@ -190,33 +200,115 @@ router.post('/:orderHash/fill', validateOrderHash, async (req, res) => {
       });
     }
     
+    console.log('✅ [DEBUG] Order found:', {
+      orderHash: order.order_hash,
+      status: order.status,
+      hasOptionParams: !!order.optionParams,
+      hasSignature: !!order.signature
+    });
+    
     // Check if order is still open
+    console.log('🔍 [DEBUG] Checking order status:', order.status);
     if (order.status !== 'open') {
+      console.log('❌ [DEBUG] Order status is not open:', order.status);
       return res.status(400).json({
         error: 'Order not available',
         message: `Order status is ${order.status}`
       });
     }
+    console.log('✅ [DEBUG] Order status is open');
     
     // Check if order has expired
     const currentTime = Math.floor(Date.now() / 1000);
+    console.log('🔍 [DEBUG] Checking order expiry:', { currentTime, orderExpiry: order.expiry });
     if (order.expiry && currentTime > order.expiry) {
+      console.log('❌ [DEBUG] Order has expired');
       return res.status(400).json({
         error: 'Order expired',
         message: 'Order has expired'
       });
     }
+    console.log('✅ [DEBUG] Order has not expired');
     
-    // For now, return order data that can be used with orderBuilder functions
+    // Generate fill calldata based on order type
+    console.log('🔍 [DEBUG] Starting fill calldata generation...');
+    let fillCalldata;
+    
+    if (order.optionParams) {
+      console.log('🔍 [DEBUG] Processing options order');
+      console.log('📋 [DEBUG] Order data structure:', {
+        hasOrderData: !!order.orderData,
+        hasSignature: !!order.signature,
+        hasInteractionData: !!order.interactionData, // Now works due to normalized field names
+        hasOptionsNFTSignature: !!order.optionsNFTSignature,
+        hasOptionsNFTSalt: !!order.optionsNFTSalt
+      });
+      
+      // This is an options order - use options fill calldata generator
+      const completeOrderData = {
+        orderTuple: [
+          order.orderData.salt,
+          order.orderData.maker,
+          order.orderData.receiver,
+          order.orderData.makerAsset,
+          order.orderData.takerAsset,
+          order.orderData.makingAmount,
+          order.orderData.takingAmount,
+          order.orderData.makerTraits
+        ],
+        lopSignature: JSON.parse(order.signature),
+        interaction: order.interaction_data, // Use the correct field name from database
+        optionsNFTSignature: {
+          r: order.options_nft_signature_r || '0x0000000000000000000000000000000000000000000000000000000000000000',
+          s: order.options_nft_signature_s || '0x0000000000000000000000000000000000000000000000000000000000000000',
+          v: parseInt(order.options_nft_signature_v) || 0
+        },
+        optionsNFTSalt: order.options_nft_salt
+      };
+      
+      console.log('📋 [DEBUG] Complete order data prepared:', {
+        orderTupleLength: completeOrderData.orderTuple.length,
+        hasLopSignature: !!completeOrderData.lopSignature,
+        hasInteraction: !!completeOrderData.interaction,
+        hasOptionsNFTSignature: !!completeOrderData.optionsNFTSignature,
+        hasOptionsNFTSalt: !!completeOrderData.optionsNFTSalt
+      });
+      
+      // Add debugging for maker traits
+      console.log('🔍 [DEBUG] Maker traits details:');
+      console.log('   Maker traits from DB:', order.orderData.makerTraits);
+      console.log('   Maker traits type:', typeof order.orderData.makerTraits);
+      console.log('   Maker traits in orderTuple:', completeOrderData.orderTuple[7]);
+      console.log('   Order tuple:', completeOrderData.orderTuple);
+      
+      console.log('🔍 [DEBUG] Calling generateOptionsFillCalldata...');
+      fillCalldata = await generateOptionsFillCalldata({
+        orderData: completeOrderData,
+        taker,
+        fillAmount,
+        lopAddress
+      });
+      console.log('✅ [DEBUG] Options fill calldata generated successfully');
+    } else {
+      console.log('🔍 [DEBUG] Processing regular LOP order');
+      // This is a regular LOP order
+      fillCalldata = await generateRegularFillCalldata({
+        order,
+        taker,
+        fillAmount,
+        lopAddress
+      });
+    }
+    
     res.json({
       success: true,
       data: {
         orderHash,
-        message: 'Use orderBuilder.fillCallOption() or orderBuilder functions to generate fill calldata',
+        fillCalldata,
         orderData: order.orderData,
         signature: JSON.parse(order.signature),
         optionParams: order.optionParams,
-        estimatedGas: order.optionParams ? '500000' : '300000'
+        estimatedGas: fillCalldata.estimatedGas
       }
     });
   } catch (error) {
@@ -354,21 +446,145 @@ router.post('/:orderHash/cancel', validateOrderHash, async (req, res) => {
  */
 async function generateOptionsFillCalldata({ orderData, taker, fillAmount, lopAddress }) {
   try {
-    const fillResult = await fillCallOption({
-      orderData,
+    console.log('🔍 [DEBUG] generateOptionsFillCalldata called with:', {
+      hasOrderData: !!orderData,
+      hasOrderTuple: !!orderData.orderTuple,
+      hasLopSignature: !!orderData.lopSignature,
+      hasInteraction: !!orderData.interaction,
       taker,
       fillAmount,
       lopAddress
     });
+
+    console.log("orderData: ", orderData);
+    console.log("tuple", taker); 
+    console.log("fillAmount", fillAmount);
+    console.log("lopAddress", lopAddress);
     
-    return {
-      to: lopAddress,
-      data: fillResult.data,
-      value: fillResult.value || '0',
-      estimatedGas: fillResult.estimatedGas || '500000'
-    };
+    // Add detailed interaction data debugging
+    console.log('🔍 [DEBUG] Interaction data details:');
+    console.log('   Interaction data:', orderData.interaction);
+    console.log('   Interaction data type:', typeof orderData.interaction);
+    console.log('   Interaction data length:', orderData.interaction.length);
+    console.log('   Interaction data starts with 0x:', orderData.interaction.startsWith('0x'));
+    console.log('   Interaction data (first 100 chars):', orderData.interaction.substring(0, 100));
+    
+    // Validate interaction data
+    if (!orderData.interaction || typeof orderData.interaction !== 'string') {
+      throw new Error('Invalid interaction data: must be a non-empty string');
+    }
+    
+    if (!orderData.interaction.startsWith('0x')) {
+      throw new Error('Invalid interaction data: must start with 0x');
+    }
+    
+    // Create interface for LOP contract
+    console.log('🔍 [DEBUG] Creating LOP interface...');
+    const lopInterface = new ethers.Interface([
+      'function fillOrderArgs((uint256,uint256,uint256,uint256,uint256,uint256,uint256,uint256), bytes32 r, bytes32 vs, uint256 makingAmount, uint256 takerTraits, bytes calldata interaction) external payable returns(uint256, uint256, bytes32)'
+    ]);
+    console.log('✅ [DEBUG] LOP interface created');
+    
+    // Calculate taker traits from interaction data length
+    console.log('🔍 [DEBUG] Calculating taker traits...');
+    console.log('📋 [DEBUG] Interaction data:', {
+      interaction: orderData.interaction,
+      length: orderData.interaction.length
+    });
+    
+    // Use the same pattern as working backend scripts and frontend
+    const interactionLength = orderData.interaction.length / 2 - 1; // Hex string length
+    const takerTraits = (BigInt(interactionLength) << 200n);
+    console.log('✅ [DEBUG] Taker traits calculated:', { 
+      interactionLength, 
+      takerTraits: takerTraits.toString(),
+      takerTraitsHex: '0x' + takerTraits.toString(16)
+    });
+    
+    // Enhanced debug: Compare with expected debug version values
+    console.log('🔍 [DEBUG] Enhanced comparison:');
+    console.log('   Raw interaction length:', orderData.interaction.length);
+    console.log('   Calculated interaction length:', interactionLength);
+    console.log('   Expected debug taker traits: 803469022129495137770981046170581301261101496891396417650688000');
+    console.log('   Backend calculated traits:', takerTraits.toString());
+    console.log('   Match:', takerTraits.toString() === '803469022129495137770981046170581301261101496891396417650688000');
+    
+    // Create vs from v and s
+    console.log('🔍 [DEBUG] Creating vs from signature components...');
+    console.log('📋 [DEBUG] Signature components:', {
+      r: orderData.lopSignature.r,
+      s: orderData.lopSignature.s,
+      v: orderData.lopSignature.v
+    });
+    
+    const v = orderData.lopSignature.v;
+    const s = orderData.lopSignature.s;
+    
+    // Create vs by combining v and s
+     console.log('Building vs format (same as frontend)...');
+     let vsBigInt, vs;
+     try {
+       vsBigInt = ethers.getBigInt(s);
+       if (v === 28) {
+         vsBigInt |= (ethers.getBigInt(1) << ethers.getBigInt(255));
+         console.log('   ✅ Applied EIP-2098 compact signature format (v=28)');
+       }
+       vs = ethers.zeroPadValue(ethers.toBeHex(vsBigInt), 32);
+       console.log('   ✅ VS format:', vs);
+       console.log('');
+     } catch (error) {
+       console.log('   ❌ Error building vs format:', error.message);
+       console.log('');
+     }
+    
+    // Encode fillOrderArgs function call
+    console.log('🔍 [DEBUG] Encoding fillOrderArgs function call...');
+    console.log('📋 [DEBUG] Function parameters:', {
+      orderTuple: orderData.orderTuple,
+      r: orderData.lopSignature.r,
+      vs,
+      fillAmount,
+      takerTraits: takerTraits.toString(),
+      interaction: orderData.interaction
+    });
+    
+    try {
+      const fillOrderData = lopInterface.encodeFunctionData('fillOrderArgs', [
+        orderData.orderTuple, // Pass as array since function signature doesn't have named fields
+        orderData.lopSignature.r,
+        vs,
+        fillAmount,
+        takerTraits,
+        orderData.interaction
+      ]);
+      
+      console.log('✅ [DEBUG] Fill order data encoded successfully');
+      console.log('📋 [DEBUG] Encoded data length:', fillOrderData.length);
+      console.log('📋 [DEBUG] Encoded data (first 100 chars):', fillOrderData.substring(0, 100));
+      console.log('📋 [DEBUG] Function selector:', fillOrderData.substring(0, 10));
+      
+      // Add debugging for function parameters
+      console.log('🔍 [DEBUG] Function parameters:');
+      console.log('   Order tuple:', orderData.orderTuple);
+      console.log('   R:', orderData.lopSignature.r);
+      console.log('   VS:', vs);
+      console.log('   Fill amount:', fillAmount.toString());
+      console.log('   Taker traits:', takerTraits.toString());
+      console.log('   Interaction length:', orderData.interaction.length);
+      
+      return {
+        to: lopAddress,
+        data: fillOrderData,
+        value: '0',
+        estimatedGas: '500000'
+      };
+    } catch (error) {
+      console.error('❌ [DEBUG] Error encoding fillOrderArgs:', error);
+      throw error;
+    }
   } catch (error) {
-    console.error('Error generating options fill calldata:', error);
+    console.error('❌ [DEBUG] Error in generateOptionsFillCalldata:', error);
+    console.error('❌ [DEBUG] Error stack:', error.stack);
     throw new Error('Failed to generate options fill calldata');
   }
 }

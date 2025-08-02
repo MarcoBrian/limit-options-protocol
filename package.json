@@ -6,15 +6,16 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:makers-traits-simple": "npx hardhat run backend/test-simple-maker-traits.js --network localhost",
+    "test:permit": "npx hardhat run backend/scripts/test-permit-functionality.js --network localhost",
     "start": "node backend/server.js",
     "dev": "nodemon backend/server.js",
     "frontend": "cd frontend && npm start",
     "dev:full": "concurrently \"npm run dev\" \"npm run frontend\"",
     "setup:frontend-env": "node scripts/setup-frontend-env.js",
-    "setup:demo" : "npx hardhat run complete-setup.js --network localhost",
-    "deploy": "npx hardhat run scripts/deploy.js --network localhost", 
+    "setup:demo": "npx hardhat run complete-setup.js --network localhost",
+    "deploy": "npx hardhat run scripts/deploy.js --network localhost",
     "hardhat-start": "npx hardhat node",
-    "everything": "npm run hardhat-start && npm run deploy && npm run setup:frontend-env && npm run setup:demo && npm run start && npm run frontend"
+    "everything": "concurrently \"npm run hardhat-start\" \"npm run deploy && npm run setup:frontend-env && npm run setup:demo\" \"npm run start\" \"npm run frontend\""
   },
   "keywords": [],
   "author": "",

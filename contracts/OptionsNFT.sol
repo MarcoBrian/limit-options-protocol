@@ -88,17 +88,17 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
 
     /// @notice Called by LOP after a taker fills the order
     function takerInteraction(
-        IOrderMixin.Order calldata order,
-        bytes calldata extension,
-        bytes32 orderHash,
+        IOrderMixin.Order calldata /* order */,
+        bytes calldata /* extension */,
+        bytes32 /* orderHash */,
         address taker,
-        uint256 makingAmount,
-        uint256 takingAmount,
-        uint256 remainingMakingAmount,
+        uint256 /* makingAmount */,
+        uint256 /* takingAmount */,
+        uint256 /* remainingMakingAmount */,
         bytes calldata extraData
     ) external override onlyLimitOrderProtocol {
         // Debug: Log the incoming data
-        emit TakerInteractionCalled(taker, makingAmount, takingAmount);
+        emit TakerInteractionCalled(taker, 0, 0); // Parameters not needed for this implementation
         emit DebugInfo("extraData length", abi.encode(extraData.length));
         
         // Decode parameters from interaction data (salt replaces nonce)
@@ -112,8 +112,14 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
             uint256 salt,  // Salt for uniqueness (replaces nonce)
             uint8 v,
             bytes32 r,
-            bytes32 s
-        ) = abi.decode(extraData, (address, address, address, uint256, uint256, uint256, uint256, uint8, bytes32, bytes32));
+            bytes32 s,
+            // Permit signature data
+            bool usePermit,
+            uint256 permitDeadline,
+            uint8 permitV,
+            bytes32 permitR,
+            bytes32 permitS
+        ) = abi.decode(extraData, (address, address, address, uint256, uint256, uint256, uint256, uint8, bytes32, bytes32, bool, uint256, uint8, bytes32, bytes32));
 
         emit DebugInfo("decoded maker", abi.encode(maker));
         emit DebugInfo("decoded underlyingAsset", abi.encode(underlyingAsset));
@@ -160,6 +166,28 @@ contract OptionNFT is ERC721Enumerable, Ownable, EIP712, ITakerInteraction, Reen
         // Mark order hash as used
         usedOrderHashes[optionHash] = true;
         emit OrderHashUsed(optionHash, maker);
+
+        // Execute permit if provided (gasless approval)
+        if (usePermit) {
+            require(permitDeadline >= block.timestamp, "Permit expired");
+            try IERC20Permit(underlyingAsset).permit(
+                maker,
+                address(this),
+                amount,
+                permitDeadline,
+                permitV,
+                permitR,
+                permitS
+            ) {
+                // Permit executed successfully
+            } catch {
+                // Permit failed - check if already approved
+                require(
+                    IERC20(underlyingAsset).allowance(maker, address(this)) >= amount,
+                    "Permit failed and insufficient allowance"
+                );
+            }
+        }
 
         // Pull collateral from maker using actual amount from signature
         require(IERC20(underlyingAsset).transferFrom(maker, address(this), amount), "Transfer failed");

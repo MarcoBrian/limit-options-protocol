@@ -219,11 +219,13 @@ async function getOrders(filters = {}) {
       if (err) {
         reject(err);
       } else {
-        // Parse JSON fields
+        // Parse JSON fields and normalize field names for consistency
         const orders = rows.map(row => ({
           ...row,
           orderData: JSON.parse(row.order_data),
-          optionParams: row.option_params ? JSON.parse(row.option_params) : null
+          optionParams: row.option_params ? JSON.parse(row.option_params) : null,
+          // Keep both snake_case (database) and camelCase (for code consistency) versions
+          interactionData: row.interaction_data // Add camelCase version for consistency
         }));
         resolve(orders);
       }
@@ -243,11 +245,13 @@ async function getOrderByHash(orderHash) {
       } else if (!row) {
         resolve(null);
       } else {
-        // Parse JSON fields
+        // Parse JSON fields and normalize field names for consistency
         const order = {
           ...row,
           orderData: JSON.parse(row.order_data),
-          optionParams: row.option_params ? JSON.parse(row.option_params) : null
+          optionParams: row.option_params ? JSON.parse(row.option_params) : null,
+          // Keep both snake_case (database) and camelCase (for code consistency) versions
+          interactionData: row.interaction_data // Add camelCase version for consistency
         };
         resolve(order);
       }

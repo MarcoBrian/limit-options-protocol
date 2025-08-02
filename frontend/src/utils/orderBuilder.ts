@@ -512,17 +512,127 @@ async function signOptionsNFT(
   return { signature, r, s, v, salt: finalSalt };
 }
 
-// Build interaction data for OptionsNFT
+/**
+ * Generate EIP-2612 permit signature for gasless approval
+ * @param params - Permit parameters
+ * @param params.signer - Signer object
+ * @param params.tokenAddress - ERC20 token address
+ * @param params.spender - Spender address (OptionsNFT contract)
+ * @param params.value - Amount to permit
+ * @param params.deadline - Permit deadline timestamp
+ * @returns Permit signature {v, r, s, deadline} or null if failed
+ */
+export async function generatePermitSignature(params: {
+  signer: ethers.Signer;
+  tokenAddress: string;
+  spender: string;
+  value: string | number | bigint;
+  deadline: number;
+}) {
+  const { signer, tokenAddress, spender, value, deadline } = params;
+  
+  try {
+    console.log('🔐 Generating EIP-2612 permit signature...');
+    console.log(`   👤 Signer: ${await signer.getAddress()}`);
+    console.log(`   🏦 Token: ${tokenAddress}`);
+    console.log(`   🎯 Spender: ${spender}`);
+    console.log(`   💰 Amount: ${ethers.formatEther(value)} tokens`);
+    console.log(`   ⏰ Deadline: ${new Date(deadline * 1000).toLocaleString()}`);
+    
+    // Create a contract instance to get token details
+    const tokenContract = new ethers.Contract(
+      tokenAddress,
+      [
+        'function name() view returns (string)',
+        'function nonces(address) view returns (uint256)'
+      ],
+      signer
+    );
+    
+    // Get token details for EIP-712 domain
+    const [name, chainId, nonces] = await Promise.all([
+      tokenContract.name(),
+      signer.provider!.getNetwork().then(n => n.chainId),
+      tokenContract.nonces(await signer.getAddress())
+    ]);
+
+    console.log(`   📋 Token name: ${name}`);
+    console.log(`   ⛓️ Chain ID: ${chainId}`);
+    console.log(`   🔢 Current nonce: ${nonces}`);
+
+    // EIP-712 domain
+    const domain = {
+      name,
+      version: "1", // Most tokens use version "1"
+      chainId,
+      verifyingContract: tokenAddress
+    };
+
+    // EIP-712 types
+    const types = {
+      Permit: [
+        { name: 'owner', type: 'address' },
+        { name: 'spender', type: 'address' },
+        { name: 'value', type: 'uint256' },
+        { name: 'nonce', type: 'uint256' },
+        { name: 'deadline', type: 'uint256' }
+      ]
+    };
+
+    // EIP-712 message
+    const message = {
+      owner: await signer.getAddress(),
+      spender,
+      value: ethers.getBigInt(value),
+      nonce: nonces,
+      deadline
+    };
+
+    console.log('   📝 Signing permit message...');
+    
+    // Sign the permit
+    const signature = await signer.signTypedData(domain, types, message);
+    const { r, s, v } = ethers.Signature.from(signature);
+
+    console.log('   ✅ Permit signature generated successfully!');
+    console.log(`   📝 v: ${v}`);
+    console.log(`   📝 r: ${r}`);
+    console.log(`   📝 s: ${s}`);
+
+    return { v, r, s, deadline };
+  } catch (error: any) {
+    console.warn("⚠️ Permit signature generation failed:", error.message);
+    console.warn("   💡 This might happen if the token doesn't support EIP-2612 permit");
+    return null;
+  }
+}
+
+// Build interaction data for OptionsNFT with permit support
 function buildOptionsNFTInteraction(params: {
   maker: string;
   optionParams: any;
   signature: any;
   optionsNFTAddress: string;
+  permitSignature?: any;
 }) {
-  const { maker, optionParams, signature, optionsNFTAddress } = params;
+  const { maker, optionParams, signature, optionsNFTAddress, permitSignature } = params;
 
+  // Prepare permit data
+  const usePermit = permitSignature !== null && permitSignature !== undefined;
+  const permitDeadline = usePermit ? permitSignature.deadline : 0;
+  const permitV = usePermit ? permitSignature.v : 0;
+  const permitR = usePermit ? permitSignature.r : ethers.ZeroHash;
+  const permitS = usePermit ? permitSignature.s : ethers.ZeroHash;
+
+  console.log('🔧 Building OptionsNFT interaction data...');
+  console.log(`   📋 Use permit: ${usePermit}`);
+  if (usePermit) {
+    console.log(`   ⏰ Permit deadline: ${new Date(permitDeadline * 1000).toLocaleString()}`);
+  }
+
+  // Encode interaction data: maker, optionParams, signature components, permit data
   const interactionData = ethers.AbiCoder.defaultAbiCoder().encode(
-    ["address", "address", "address", "uint256", "uint256", "uint256", "uint256", "uint8", "bytes32", "bytes32"],
+    ["address", "address", "address", "uint256", "uint256", "uint256", "uint256", "uint8", "bytes32", "bytes32", "bool", "uint256", "uint8", "bytes32", "bytes32"],
     [
       maker,
       optionParams.underlyingAsset,
@@ -533,7 +643,13 @@ function buildOptionsNFTInteraction(params: {
       signature.salt,
       signature.v,
       signature.r,
-      signature.s
+      signature.s,
+      // Permit signature data
+      usePermit,
+      permitDeadline,
+      permitV,
+      permitR,
+      permitS
     ]
   );
 
@@ -541,6 +657,8 @@ function buildOptionsNFTInteraction(params: {
     optionsNFTAddress,
     interactionData
   ]);
+
+  console.log('   ✅ Interaction data built successfully');
 
   // Return the hex string directly (like backend)
   return fullInteractionData;
@@ -585,6 +703,7 @@ export async function buildCompleteCallOption(params: {
   salt?: string | number;  // Accept string or number like backend
   lopNonce?: number;
   customMakerTraits?: bigint;
+  usePermit?: boolean;  // NEW: Enable/disable permit functionality
 }) {
   const {
     makerSigner,
@@ -688,7 +807,33 @@ export async function buildCompleteCallOption(params: {
   console.log('\n⏳ Adding delay between signatures to prevent account switching...');
   await new Promise(resolve => setTimeout(resolve, 1000));
 
-  // 3. Sign the OptionsNFT
+  // 3. Generate permit signature (deadline = option expiry)
+  let permitSignature = null;
+  if (params.usePermit !== false) { // Default to true unless explicitly disabled
+    console.log('\n🔐 Generating permit signature for gasless approval...');
+    const permitDeadline = expiry; // Use option expiry as permit deadline
+    permitSignature = await generatePermitSignature({
+      signer: makerSigner,
+      tokenAddress: underlyingAsset,
+      spender: optionsNFTAddress,
+      value: optionAmount,
+      deadline: permitDeadline
+    });
+    
+    if (permitSignature) {
+      console.log('   ✅ Permit signature generated - gasless approval enabled!');
+      console.log(`   ⏰ Permit expires: ${new Date(permitDeadline * 1000).toLocaleString()}`);
+    } else {
+      console.log('   ⚠️ Permit signature failed - will require manual approval');
+    }
+  } else {
+    console.log('\n🔐 Permit disabled - manual approval required');
+  }
+
+  // Add another delay before OptionsNFT signature
+  await new Promise(resolve => setTimeout(resolve, 500));
+
+  // 4. Sign the OptionsNFT
   console.log('\n🔍 BEFORE OPTIONSNFT SIGNATURE - Signer Address:', await makerSigner.getAddress());
   const optionsNFTSignature = await signOptionsNFT(
     {
@@ -721,7 +866,7 @@ export async function buildCompleteCallOption(params: {
   console.log('   LOP Address:', lopAddress);
   console.log('   OptionsNFT Address:', optionsNFTAddress);
 
-  // 4. Build interaction data
+  // 5. Build interaction data
   const interaction = buildOptionsNFTInteraction({
     maker: makerAddress,
     optionParams: {
@@ -732,7 +877,8 @@ export async function buildCompleteCallOption(params: {
       optionAmount: BigInt(optionAmount)
     },
     signature: optionsNFTSignature,
-    optionsNFTAddress
+    optionsNFTAddress,
+    permitSignature  // Include permit signature
   });
 
   // 🔍 DEBUG: Final summary
@@ -741,6 +887,10 @@ export async function buildCompleteCallOption(params: {
   console.log('   ✅ OptionsNFT signed');
   console.log('   ✅ Interaction data built');
   console.log('   ✅ Order ready for submission');
+  console.log(`   🔐 Permit enabled: ${permitSignature ? 'YES - Gasless approval!' : 'NO - Manual approval required'}`);
+  if (permitSignature) {
+    console.log(`   ⏰ Permit expires: ${new Date(permitSignature.deadline * 1000).toLocaleString()}`);
+  }
   console.log('   📋 Order Hash:', orderResult.order.salt ? 'Will be calculated by backend' : 'N/A');
   console.log('   👤 Maker Address:', makerAddress);
   console.log('   🔐 LOP Signature V:', lopSignature.v);
@@ -879,6 +1029,7 @@ export async function buildCompleteCallOption(params: {
     },
     lopSignature,
     optionsNFTSignature,
+    permitSignature,  // Include permit signature
     interaction,
     salt: finalSalt, // Return as string like backend
     lopNonce: Number(lopNonceValue)

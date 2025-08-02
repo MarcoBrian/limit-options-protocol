@@ -17,8 +17,10 @@ const ERC20_ABI = [
 /**
  * Calculate taker traits from interaction data length
  */
-function calculateTakerTraits(interactionData: string): bigint {
-  const length = interactionData.length / 2 - 1; // Hex string length
+function calculateTakerTraits(interactionData: string | null | undefined): bigint {
+  // Handle null/undefined interactionData
+  const safeInteractionData = interactionData || '0x';
+  const length = safeInteractionData.length / 2 - 1; // Hex string length
   return BigInt(length) << 200n;
 }
 
@@ -146,7 +148,7 @@ export async function fillOrder(
     const { r, vs } = buildSignatureComponents(signature);
     
     const fillAmount = BigInt(order.taking_amount);
-    const interactionData = order.interaction_data;
+    const interactionData = order.interaction_data || '0x';
     const takerTraits = calculateTakerTraits(interactionData);
     
     console.log('   ✅ Order tuple built');

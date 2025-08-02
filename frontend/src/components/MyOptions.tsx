@@ -4,6 +4,8 @@ import { useWallet } from '../contexts/WalletContext';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { fetchUserOptions, exerciseOption, UserOption } from '../utils/optionsFetcher';
+import { getContractAddresses } from '../config/contracts';
+
 
 const MyOptions: React.FC = () => {
   const { account, isConnected, signer } = useWallet();
@@ -35,12 +37,34 @@ const MyOptions: React.FC = () => {
     }
   };
   
+
   const getAssetSymbol = (address: string) => {
+    // Get contract addresses from environment variables
+    const contractAddresses = getContractAddresses();
     const addressLower = address.toLowerCase();
-    if (addressLower.includes('610178da') || addressLower.includes('eth')) return 'ETH';
-    if (addressLower.includes('8a791620') || addressLower.includes('usdc')) return 'USDC';
-    return 'Token';
+    
+    // Create mapping from contract addresses to symbols
+    const addressSymbolMap: { [key: string]: string } = {
+      [contractAddresses.mockUSDCAddress.toLowerCase()]: 'USDC',
+      [contractAddresses.mockETHAddress.toLowerCase()]: 'ETH',
+      [contractAddresses.dummyTokenAddress.toLowerCase()]: 'OPT', // Dummy option token
+    };
+    
+    // Check exact address match first
+    if (addressSymbolMap[addressLower]) {
+      return addressSymbolMap[addressLower];
+    }
+    
+    // Fallback to partial matching for any other tokens
+    if (addressLower.includes('usdc')) return 'USDC';
+    if (addressLower.includes('eth')) return 'ETH';
+    if (addressLower.includes('wbtc')) return 'WBTC';
+    if (addressLower.includes('link')) return 'LINK';
+    if (addressLower.includes('uni')) return 'UNI';
+    
+    return 'Unknown';
   };
+
   
   // Fetch user's options when wallet connects
   const loadUserOptions = async () => {

@@ -3,9 +3,10 @@ import { useWallet } from '../contexts/WalletContext';
 import { useApp } from '../contexts/AppContext';
 import { useToast } from '../contexts/ToastContext';
 import { fillOrder } from '../utils/orderFiller';
+import { getContractAddresses } from '../config/contracts';
 
 const OrderGrid: React.FC = () => {
-  const { isConnected, signer } = useWallet();
+  const { isConnected, signer, account } = useWallet();
   const { orders, loading, error, fetchOrders } = useApp();
   const { showToast } = useToast();
   
@@ -38,14 +39,35 @@ const OrderGrid: React.FC = () => {
   };
 
   const getAssetSymbol = (address: string) => {
-    // Simple mapping - in a real app, you'd have a proper asset registry
+    // Get contract addresses from environment variables
+    const contractAddresses = getContractAddresses();
     const addressLower = address.toLowerCase();
-    if (addressLower.includes('eth') || addressLower.includes('0xe7f1725')) return 'ETH';
-    if (addressLower.includes('usdc') || addressLower.includes('0x5fbdb')) return 'USDC';
+    
+    // Create mapping from contract addresses to symbols
+    const addressSymbolMap: { [key: string]: string } = {
+      [contractAddresses.mockUSDCAddress.toLowerCase()]: 'USDC',
+      [contractAddresses.mockETHAddress.toLowerCase()]: 'ETH',
+      [contractAddresses.dummyTokenAddress.toLowerCase()]: 'OPT', // Dummy option token
+    };
+    
+    // Check exact address match first
+    if (addressSymbolMap[addressLower]) {
+      return addressSymbolMap[addressLower];
+    }
+    
+    // Fallback to partial matching for any other tokens
+    if (addressLower.includes('usdc')) return 'USDC';
+    if (addressLower.includes('eth')) return 'ETH';
     if (addressLower.includes('wbtc')) return 'WBTC';
     if (addressLower.includes('link')) return 'LINK';
     if (addressLower.includes('uni')) return 'UNI';
+    
     return 'Unknown';
+  };
+
+  const isOrderCreator = (order: any) => {
+    return account && order.maker && 
+           account.toLowerCase() === order.maker.toLowerCase();
   };
 
   const handleBuyOption = async (order: any) => {
@@ -76,7 +98,7 @@ const OrderGrid: React.FC = () => {
         }
       );
       
-      // Success!
+      // Success! Now mark the order as filled
       showToast(
         `Option purchased successfully! ${result.optionTokenId ? `NFT ID: ${result.optionTokenId}` : ''}`,
         'success'
@@ -86,6 +108,47 @@ const OrderGrid: React.FC = () => {
         txHash: result.txHash,
         optionTokenId: result.optionTokenId
       });
+      
+      // Mark order as filled in backend
+      try {
+        setFillProgress(prev => ({ ...prev, [orderHash]: 'Updating order status...' }));
+        
+        console.log('🔄 Marking order as filled...');
+        console.log('   Order Hash:', orderHash);
+        console.log('   TX Hash:', result.txHash);
+        console.log('   Taker Account:', account);
+        console.log('   API URL:', `/api/orders/${orderHash}/filled`);
+        
+        const requestBody = {
+          txHash: result.txHash,
+          taker: account
+        };
+        console.log('   Request Body:', requestBody);
+        
+        const response = await fetch(`http://localhost:3000/api/orders/${orderHash}/filled`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody)
+        });
+        
+        console.log('   Response Status:', response.status);
+        console.log('   Response OK:', response.ok);
+        
+        const responseData = await response.text();
+        console.log('   Response Data:', responseData);
+        
+        if (response.ok) {
+          console.log('✅ Order marked as filled in database');
+        } else {
+          console.warn('⚠️ Failed to mark order as filled:', response.status, responseData);
+        }
+      } catch (markError: any) {
+        console.error('⚠️ Error marking order as filled:', markError);
+        console.error('   Error details:', markError.message || 'Unknown error');
+        // Don't throw - the main transaction succeeded
+      }
       
       // Refresh orders to remove the filled order
       await fetchOrders();
@@ -141,6 +204,9 @@ const OrderGrid: React.FC = () => {
     );
   }
 
+  // Filter to only show open orders (available for purchase)
+  const openOrders = orders.filter(order => order.status === 'open');
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
@@ -154,15 +220,17 @@ const OrderGrid: React.FC = () => {
         </button>
       </div>
 
-      {orders.length === 0 ? (
+      {openOrders.length === 0 ? (
         <div className="text-center py-12">
           <p className="text-text-secondary">
-            Create some options using the "Create" tab to see them here
+            {orders.length === 0 
+              ? 'Create some options using the "Create" tab to see them here'
+              : 'No open options available. All options have been filled or closed.'}
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {orders.map((order, index) => {
+          {openOrders.map((order, index) => {
             const optionParams = order.optionParams;
             
             return (
@@ -188,9 +256,9 @@ const OrderGrid: React.FC = () => {
 
                   <div className="space-y-2">
                     <div className="flex justify-between">
-                      <span className="text-sm text-text-secondary">Underlying:</span>
+                      <span className="text-sm text-text-secondary">Underlying Asset:</span>
                       <span className="text-sm font-medium">
-                        {getAssetSymbol(order.maker_asset)} ({formatAddress(optionParams.underlyingAsset)})
+                        {getAssetSymbol(optionParams.underlyingAsset)} ({formatAddress(optionParams.underlyingAsset)})
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -254,11 +322,12 @@ const OrderGrid: React.FC = () => {
                     ) : (
                       <button
                         onClick={() => handleBuyOption(order)}
-                        disabled={!isConnected || order.status !== 'open' || !signer}
+                        disabled={!isConnected || order.status !== 'open' || !signer || isOrderCreator(order)}
                         className="w-full btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {!isConnected ? 'Connect Wallet' : 
-                         order.status !== 'open' ? 'Not Available' : 'Buy Option'}
+                         order.status !== 'open' ? 'Not Available' :
+                         isOrderCreator(order) ? 'Your Option' : 'Buy Option'}
                       </button>
                     )}
                   </div>

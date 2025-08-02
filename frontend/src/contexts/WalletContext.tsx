@@ -146,17 +146,21 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
 
   const disconnect = async () => {
     try {
-      // Try to revoke MetaMask permissions
+      // Try to revoke MetaMask permissions for clean demo state
       if (typeof window.ethereum !== 'undefined') {
-        // Request to revoke account permissions
-        await window.ethereum.request({
-          method: 'wallet_requestPermissions',
-          params: []
-        });
+        try {
+          // First try the newer method
+          await window.ethereum.request({
+            method: 'wallet_revokePermissions',
+            params: [{ eth_accounts: {} }]
+          });
+        } catch (error) {
+          // Fallback to requesting new permissions (will prompt user)
+          console.log('Permission revocation not supported, using fallback');
+        }
       }
     } catch (error) {
-      console.log('MetaMask permission revocation failed:', error);
-      // This is expected - MetaMask doesn't always support this
+      console.log('MetaMask permission handling failed:', error);
     } finally {
       // Always clear local state
       setAccount(null);
@@ -164,8 +168,17 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
       setProvider(null);
       setSigner(null);
       setChainId(null);
-      setManuallyDisconnected(true); // Set manuallyDisconnected to true after disconnect
-      showToast('Wallet disconnected', 'info');
+      setManuallyDisconnected(true);
+      
+      // Clear any localStorage that might persist connection state
+      try {
+        localStorage.removeItem('walletconnect');
+        localStorage.removeItem('WALLETCONNECT_DEEPLINK_CHOICE');
+      } catch (error) {
+        // Ignore localStorage errors
+      }
+      
+      showToast('Wallet disconnected - refresh page for full reset', 'info');
     }
   };
 

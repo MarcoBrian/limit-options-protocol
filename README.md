@@ -93,7 +93,13 @@ limit-options-protocol/
 └── external/           # External dependencies (1inch Limit Order Protocol contracts for local deployment)
 ```
 
-## Deployed Base Sepolia Testnet Contracts Address
+## Live Demo - Deployed Base Sepolia Testnet Contracts Address
+
+Live Demo URL : [1option.vercel.app](https://1option.vercel.app/)
+
+Live Demo is currently performed on Base Sepolia Testnest, the following contracts below are being used. 
+
+You may use the mock tokens to mint your own tokens to test the feature
 
 ```bash 
 Limit Order Protocol = 0xC7433cC4c521F8e99986F00513f4a88eE9FF28CC
@@ -102,3 +108,14 @@ Mock ETH = 0x1F8e0acB0a1A06De7E597e92cB250C84D925b8ba
 Mock USDC = 0xD76910835C67BD138442744c6D080F92d009e6d6
 Dummy Token = 0x7A501C90c7D9605f7BD42649585eD03D4c1757c7
 ```
+### Base Sepolia Testnet Contract Addresses
+
+Limit Order Protocol : https://sepolia.basescan.org/address/0xC7433cC4c521F8e99986F00513f4a88eE9FF28CC
+
+Option NFT : https://sepolia.basescan.org/token/0x3918BBBd2ED463Ea3849ccfdcCf0b4AD1f6C7145
+
+Test USDC: https://sepolia.basescan.org/address/0xD76910835C67BD138442744c6D080F92d009e6d6
+
+Test wETH: https://sepolia.basescan.org/address/0x1F8e0acB0a1A06De7E597e92cB250C84D925b8ba
+
+Dummy Token : https://sepolia.basescan.org/address/0x7A501C90c7D9605f7BD42649585eD03D4c1757c7

@@ -25,8 +25,14 @@ export const getContractAddresses = (): ContractAddresses => {
     .map(([key]) => key);
 
   if (missingAddresses.length > 0) {
+    const networkConfig = getNetworkConfig();
     console.warn('⚠️ Missing contract addresses:', missingAddresses);
-    console.warn('Please run the deployment script first: npx hardhat run scripts/deploy.js --network localhost');
+    
+    if (networkConfig.chainId === 84532) {
+      console.warn('Please deploy contracts first: npm run deploy:base-sepolia');
+    } else {
+      console.warn('Please run the deployment script first: npx hardhat run scripts/deploy.js --network localhost');
+    }
   }
 
   return addresses;
@@ -55,8 +61,10 @@ export const validateContractAddresses = (addresses: ContractAddresses): boolean
 
 // Get network configuration
 export const getNetworkConfig = () => {
+  const chainId = parseInt(process.env.REACT_APP_CHAIN_ID || '31337');
+  
   return {
-    chainId: parseInt(process.env.REACT_APP_CHAIN_ID || '31337'),
+    chainId,
     rpcUrl: process.env.REACT_APP_RPC_URL || 'http://localhost:8545',
     networkName: process.env.REACT_APP_NETWORK || 'localhost'
   };

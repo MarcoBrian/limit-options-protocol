@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 async function updateEnvFile(addresses) {
-  const envPath = path.join(__dirname, '..', '.env');
+  const envPath = path.join(__dirname, '..', '..', '.env');
   
   // Read existing .env file if it exists
   let envContent = '';

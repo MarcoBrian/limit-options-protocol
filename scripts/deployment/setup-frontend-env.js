@@ -2,8 +2,8 @@ const fs = require('fs');
 const path = require('path');
 
 // Read the root .env file
-const rootEnvPath = path.join(__dirname, '..', '.env');
-const frontendEnvPath = path.join(__dirname, '..', 'frontend', '.env');
+const rootEnvPath = path.join(__dirname, '..', '..', '.env');
+const frontendEnvPath = path.join(__dirname, '..', '..', 'frontend', '.env');
 
 try {
   // Read the root .env file

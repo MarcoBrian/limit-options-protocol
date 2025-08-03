@@ -1,9 +1,13 @@
 require('dotenv').config();
 
+// Get NODE_ENV first to use in other config
+const nodeEnv = process.env.NODE_ENV || 'development';
+const isProduction = nodeEnv === 'production';
+
 const config = {
   // Server configuration
   port: process.env.PORT || 3000,
-  nodeEnv: process.env.NODE_ENV || 'development',
+  nodeEnv: nodeEnv,
   
   // Database configuration
   database: {
@@ -12,7 +16,7 @@ const config = {
   
   // Blockchain configuration
   blockchain: {
-    chainId: parseInt(process.env.CHAIN_ID) || 1,
+    chainId: parseInt(process.env.CHAIN_ID) || 31337,
     rpcUrl: process.env.RPC_URL || 'http://localhost:8545',
     lopAddress: process.env.LOP_ADDRESS || '',
     optionsNFTAddress: process.env.OPTIONS_NFT_ADDRESS || ''
@@ -21,7 +25,7 @@ const config = {
   // Security configuration
   security: {
     rateLimitWindowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-    rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX) || 100,
+    rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX) || 1000,
     corsOrigin: process.env.CORS_ORIGIN || '*'
   },
   

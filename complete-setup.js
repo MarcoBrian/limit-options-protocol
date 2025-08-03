@@ -16,15 +16,23 @@ async function completeSetup() {
     
     // Step 2: Get signers and contract instances
     console.log('\n📋 Step 2: Getting signers and contract instances...');
-    const [deployer, secondAccount, thirdAccount] = await ethers.getSigners();
+    const signers = await ethers.getSigners();
+    const deployer = signers[0];
     
-    // Use specific addresses as requested
-    const maker = deployer;        // 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
-    const taker = secondAccount;   // 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+    // Check how many signers we have and assign accounts accordingly
+    console.log(`   Available signers: ${signers.length}`);
+    
+    // Set up maker and taker based on available signers
+    const maker = deployer;
+    const taker = signers.length >= 2 ? signers[1] : deployer;
     
     console.log('   Deployer:', deployer.address);
     console.log('   Maker:', maker.address);
     console.log('   Taker:', taker.address);
+    
+    if (maker.address === taker.address) {
+      console.log('   ℹ️  Note: Using same account for maker and taker (testnet setup)');
+    }
     
     const mockETH = await ethers.getContractAt('MockERC20', process.env.MOCK_ETH_ADDRESS);
     const mockUSDC = await ethers.getContractAt('MockERC20', process.env.MOCK_USDC_ADDRESS);
@@ -36,10 +44,9 @@ async function completeSetup() {
     console.log('   LOP:', process.env.LOP_ADDRESS);
     console.log('   OptionsNFT:', process.env.OPTIONS_NFT_ADDRESS);
     
-    // Step 3: Use the signer objects (not string addresses)  
-    console.log('\n👥 Step 3: Account setup...');
-    console.log('   Maker (order creator):', maker.address);
-    console.log('   Taker (option buyer):', taker.address); 
+    // Step 3: Account setup verification
+    console.log('\n👥 Step 3: Account setup verification...');
+    console.log('   Ready to proceed with maker and taker accounts'); 
     
     // Step 4: Mint tokens
     console.log('\n💰 Step 4: Minting tokens...');

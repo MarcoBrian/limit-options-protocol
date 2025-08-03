@@ -12,14 +12,19 @@ const { initializeDatabase } = require('./database/db');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+const config = require('./config/config');
+
 // Security middleware
 app.use(helmet());
-app.use(cors());
+app.use(cors({
+  origin: config.security.corsOrigin,
+  credentials: true
+}));
 
-// Rate limiting - more lenient for development
+// Rate limiting
 const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes default
-  max: parseInt(process.env.RATE_LIMIT_MAX) || 1000, // 1000 requests per window for development
+  windowMs: config.security.rateLimitWindowMs,
+  max: config.security.rateLimitMax,
   message: 'Too many requests from this IP, please try again later.',
   standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
   legacyHeaders: false, // Disable the `X-RateLimit-*` headers

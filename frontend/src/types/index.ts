@@ -86,6 +86,7 @@ export interface WalletContextType {
   signMessage: (message: string) => Promise<string>;
   provider: any;
   signer: any; // Add signer property
+  isMetaMaskAvailable: boolean;
 }
 
 export interface AppContextType {

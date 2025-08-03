@@ -18,7 +18,9 @@
     "check:deployment": "node scripts/deployment/check-deployment.js",
     "check:deployer": "node scripts/deployment/check-deployer.js",
     "test:signer": "node scripts/deployment/test-signer.js",
-
+    "setup:production": "node scripts/setup-production.js",
+    "build:frontend": "cd frontend && npm run build",
+    
     "switch:hardhat": "node scripts/switch-env.js hardhat",
     "switch:base-sepolia": "node scripts/switch-env.js base-sepolia",
     "hardhat-start": "npx hardhat node",

@@ -685,29 +685,18 @@ async function setupDummyTokensForMaker(params) {
   const dummyToken = await ethers.getContractAt("DummyOptionToken", dummyTokenAddress);
   const makerSigner = await ethers.getSigner(maker);
   
-  // Mint dummy tokens to maker
-  await dummyToken.mint(maker, optionAmount);
-  
-  // Get current allowance and add the new optionAmount to it
-  const currentAllowance = await dummyToken.allowance(maker, lopAddress);
-  const newAllowance = currentAllowance + optionAmount;
-  
-  // Approve LOP to spend the increased amount of dummy tokens
-  await dummyToken.connect(makerSigner).approve(lopAddress, newAllowance);
+  // Note: DummyToken (ERC20True) always returns balance and max allowance for any address
+  // Mint and approve calls are not needed but we'll call approve for consistency
+  await dummyToken.connect(makerSigner).approve(lopAddress, ethers.MaxUint256);
   
   console.log(`✅ Setup ${ethers.formatEther(optionAmount)} dummy tokens for maker ${maker}`);
-  console.log(`   Total allowance now: ${ethers.formatEther(newAllowance)}`);
+  console.log(`   Dummy tokens always available (ERC20True pattern)`);
 }
 
 async function cleanupDummyTokens(dummyTokenAddress, holder) {
-  const dummyToken = await ethers.getContractAt("DummyOptionToken", dummyTokenAddress);
-  const holderSigner = await ethers.getSigner(holder);
-  
-  const balance = await dummyToken.balanceOf(holder);
-  if (balance > 0) {
-    await dummyToken.connect(holderSigner).burn(balance);
-    console.log(`🔥 Burned ${ethers.formatEther(balance)} dummy tokens for ${holder}`);
-  }
+  // Note: DummyToken (ERC20True) doesn't have real balances or burn functionality
+  // This function is kept for API compatibility but does nothing
+  console.log(`✅ Cleanup dummy tokens for ${holder} (no action needed for ERC20True)`);
 }
 
 module.exports = {

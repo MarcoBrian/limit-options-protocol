@@ -15,10 +15,8 @@
 - [Key Features](#-key-features)
 - [Architecture](#-architecture)
 - [Prerequisites](#-prerequisites)
-- [Quick Start](#-quick-start)
 - [Development Setup](#-development-setup)
 - [Project Structure](#-project-structure)
-- [Contributing](#-contributing)
 
 ## Overview
 
@@ -83,7 +81,7 @@ npm start
 npm run frontend
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 limit-options-protocol/
@@ -93,4 +91,14 @@ limit-options-protocol/
 ├── scripts/            # Deployment and utility scripts
 ├── test/               # Test files
 └── external/           # External dependencies (1inch Limit Order Protocol contracts for local deployment)
+```
+
+## Deployed Base Sepolia Testnet Contracts Address
+
+```bash 
+Limit Order Protocol = 0xC7433cC4c521F8e99986F00513f4a88eE9FF28CC
+Option NFT = 0x3918BBBd2ED463Ea3849ccfdcCf0b4AD1f6C7145
+Mock ETH = 0x1F8e0acB0a1A06De7E597e92cB250C84D925b8ba
+Mock USDC = 0xD76910835C67BD138442744c6D080F92d009e6d6
+Dummy Token = 0x7A501C90c7D9605f7BD42649585eD03D4c1757c7
 ```

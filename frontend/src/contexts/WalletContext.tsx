@@ -17,6 +17,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
   const [isConnecting, setIsConnecting] = useState(false);
   const [chainId, setChainId] = useState<number | null>(null);
   const [manuallyDisconnected, setManuallyDisconnected] = useState(false);
+  const [isMetaMaskAvailable, setIsMetaMaskAvailable] = useState(typeof window.ethereum !== 'undefined');
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -26,67 +27,98 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
     }
 
     // Check if MetaMask is installed
-    if (typeof window.ethereum !== 'undefined') {
-      const ethereum = window.ethereum;
-      const provider = new ethers.BrowserProvider(ethereum);
-      setProvider(provider);
+    const metaMaskAvailable = typeof window.ethereum !== 'undefined';
+    setIsMetaMaskAvailable(metaMaskAvailable);
+    
+    if (metaMaskAvailable) {
+      try {
+        const ethereum = window.ethereum;
+        const provider = new ethers.BrowserProvider(ethereum);
+        setProvider(provider);
 
-      // Get signer when provider is set
-      const getSigner = async () => {
-        try {
-          const signer = await provider.getSigner();
-          setSigner(signer);
-        } catch (error) {
-          console.error('Error getting signer:', error);
-        }
-      };
-      getSigner();
-
-      // Check if already connected
-      ethereum.request({ method: 'eth_accounts' })
-        .then(async (accounts: string[]) => {
-          if (accounts.length > 0) {
-            setAccount(accounts[0]);
-            setIsConnected(true);
-            // Get signer for connected account
+        // Get signer when provider is set
+        const getSigner = async () => {
+          try {
             const signer = await provider.getSigner();
             setSigner(signer);
+          } catch (error) {
+            console.error('Error getting signer:', error);
           }
-        })
-        .catch((err: any) => {
-          console.error('Error checking existing accounts:', err);
-          showToast('Failed to check existing connection', 'error');
+        };
+        getSigner();
+
+        // Check if already connected
+        ethereum.request({ method: 'eth_accounts' })
+          .then(async (accounts: string[]) => {
+            if (accounts.length > 0) {
+              setAccount(accounts[0]);
+              setIsConnected(true);
+              // Get signer for connected account
+              try {
+                const signer = await provider.getSigner();
+                setSigner(signer);
+              } catch (error) {
+                console.error('Error getting signer for connected account:', error);
+              }
+            }
+          })
+          .catch((err: any) => {
+            console.error('Error checking existing accounts:', err);
+            showToast('Failed to check existing connection', 'error');
+          });
+
+        // Get current chain ID
+        ethereum.request({ method: 'eth_chainId' })
+          .then((chainId: string) => {
+            setChainId(parseInt(chainId, 16));
+          })
+          .catch(console.error);
+
+        // Listen for account changes
+        ethereum.on('accountsChanged', async (accounts: string[]) => {
+          try {
+            if (accounts.length > 0) {
+              setAccount(accounts[0]);
+              setIsConnected(true);
+              // Update signer for new account
+              const signer = await provider.getSigner();
+              setSigner(signer);
+            } else {
+              setAccount(null);
+              setIsConnected(false);
+              setSigner(null);
+            }
+          } catch (error) {
+            console.error('Error handling account change:', error);
+            setAccount(null);
+            setIsConnected(false);
+            setSigner(null);
+          }
         });
 
-      // Get current chain ID
-      ethereum.request({ method: 'eth_chainId' })
-        .then((chainId: string) => {
-          setChainId(parseInt(chainId, 16));
-        })
-        .catch(console.error);
-
-      // Listen for account changes
-      ethereum.on('accountsChanged', async (accounts: string[]) => {
-        if (accounts.length > 0) {
-          setAccount(accounts[0]);
-          setIsConnected(true);
-          // Update signer for new account
-          const signer = await provider.getSigner();
-          setSigner(signer);
-        } else {
-          setAccount(null);
-          setIsConnected(false);
-          setSigner(null);
-        }
-      });
-
-      // Listen for chain changes
-      ethereum.on('chainChanged', (chainId: string) => {
-        setChainId(parseInt(chainId, 16));
-        console.log('Network changed to:', parseInt(chainId, 16));
-      });
+        // Listen for chain changes
+        ethereum.on('chainChanged', (chainId: string) => {
+          try {
+            setChainId(parseInt(chainId, 16));
+            console.log('Network changed to:', parseInt(chainId, 16));
+          } catch (error) {
+            console.error('Error handling chain change:', error);
+          }
+        });
+      } catch (error) {
+        console.error('Error initializing wallet provider:', error);
+        showToast('Failed to initialize wallet connection', 'error');
+        // Reset all wallet state on initialization error
+        setAccount(null);
+        setIsConnected(false);
+        setProvider(null);
+        setSigner(null);
+        setChainId(null);
+      }
     } else {
-      showToast('MetaMask is not installed', 'error');
+      console.log('MetaMask is not installed');
+      // Don't show error toast immediately on load - let user try to connect first
+      // This prevents the error from showing before user has a chance to install MetaMask
     }
   }, [showToast, manuallyDisconnected]);
 
@@ -215,6 +247,7 @@ export const WalletProvider: React.FC<WalletProviderProps> = ({ children }) => {
     signMessage,
     provider,
     signer, // Add signer to context
+    isMetaMaskAvailable,
   };
 
   return (

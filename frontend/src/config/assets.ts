@@ -35,32 +35,11 @@ const contractAddresses = getContractAddresses();
 // Underlying assets (assets that can be the underlying of an option)
 export const UNDERLYING_ASSETS: Asset[] = [
   {
-    symbol: 'ETH',
-    name: 'Ethereum',
+    symbol: 'wETH',
+    name: 'Mock Wrapped Ethereum',
     address: contractAddresses.mockETHAddress || '0x0000000000000000000000000000000000000000',
     decimals: 18,
     logo: '🟣'
-  },
-  {
-    symbol: 'WBTC',
-    name: 'Wrapped Bitcoin',
-    address: '0xD8d8D8D8D8D8D8D8D8D8D8D8D8D8D8D8D8D8D8', // Mock WBTC
-    decimals: 8,
-    logo: '🟠'
-  },
-  {
-    symbol: 'LINK',
-    name: 'Chainlink',
-    address: '0xF8f8F8F8F8F8F8F8F8F8F8F8F8F8F8F8F8F8F8', // Mock LINK
-    decimals: 18,
-    logo: '🔗'
-  },
-  {
-    symbol: 'UNI',
-    name: 'Uniswap',
-    address: '0xG8g8G8G8G8G8G8G8G8G8G8G8G8G8G8G8G8G8G8', // Mock UNI
-    decimals: 18,
-    logo: '🦄'
   }
 ];
 
@@ -68,24 +47,10 @@ export const UNDERLYING_ASSETS: Asset[] = [
 export const STRIKE_ASSETS: Asset[] = [
   {
     symbol: 'USDC',
-    name: 'USD Coin',
+    name: 'Mock USDC Coin',
     address: contractAddresses.mockUSDCAddress || '0x0000000000000000000000000000000000000000',
     decimals: 6,
     logo: '🔵'
-  },
-  {
-    symbol: 'USDT',
-    name: 'Tether',
-    address: '0xB8c8C8C8C8C8C8C8C8C8C8C8C8C8C8C8C8C8C8', // Mock USDT
-    decimals: 6,
-    logo: '🟢'
-  },
-  {
-    symbol: 'ETH',
-    name: 'Ethereum',
-    address: contractAddresses.mockETHAddress || '0x0000000000000000000000000000000000000000',
-    decimals: 18,
-    logo: '🟣'
   }
 ];
 

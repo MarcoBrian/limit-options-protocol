@@ -1,6 +1,63 @@
-# Options Protocol Test Scripts
+# Scripts Directory
 
-This directory contains test scripts for the Options Protocol built on top of the 1inch Limit Order Protocol, implementing a dummy token approach to prevent unwanted asset transfers during option creation.
+This directory contains organized utility scripts for the Options Protocol project.
+
+## 📁 Organized Structure
+
+### 📦 `deployment/` - Deployment Scripts
+- **`deploy.js`** - Deploy to localhost/hardhat network
+- **`deploy-production.js`** - Deploy to production networks (Base Sepolia)
+- **`setup-production-env.js`** - Setup production environment variables
+- **`setup-frontend-env.js`** - Setup frontend environment variables
+- **`check-deployment.js`** - Verify contract deployments
+- **`check-deployer.js`** - Check deployer account status
+- **`test-signer.js`** - Test Hardhat signer configuration
+
+### 🔑 `accounts/` - Account Management
+- **`switch-account-mode.js`** - Switch between account configurations (Hardhat defaults vs production)
+- **`setup-hardhat-defaults.js`** - Setup Hardhat's well-known default accounts
+- **`fund-test-accounts.js`** - Fund test accounts on localhost with ETH
+
+### 🌐 `network/` - Network Management  
+- **`switch-network.js`** - Switch between network configurations (localhost/base-sepolia)
+- **`verify-network.js`** - Verify network connections and contracts
+- **`which-network.js`** - Show currently configured network
+
+### 🛠️ `helpers/` - Helper Utilities
+- **`nonceManager.js`** - Nonce management utilities
+- **`orderBuilder.js`** - Order building utilities
+
+### 🗄️ `utils/` - General Utilities
+- **`envLoader.js`** - Environment loading utilities
+- **`envLoaderCLI.js`** - CLI environment utilities
+
+### 📦 `archived/` - Legacy Scripts
+- Old test scripts kept for reference
+
+## 🚀 Quick Commands
+
+```bash
+# Deployment
+npm run deploy                    # Deploy to localhost
+npm run deploy:base-sepolia      # Deploy to Base Sepolia
+npm run check:deployment         # Verify deployment
+
+# Account Management  
+npm run accounts:hardhat         # Switch to Hardhat default accounts
+npm run accounts:production      # Switch to production accounts
+npm run accounts:status          # Check current account mode
+
+# Network Management
+npm run network:localhost        # Switch to localhost config
+npm run network:base-sepolia     # Switch to Base Sepolia config  
+npm run network:verify           # Verify network and contracts
+```
+
+---
+
+# Options Protocol Implementation
+
+This section contains test scripts for the Options Protocol built on top of the 1inch Limit Order Protocol, implementing a dummy token approach to prevent unwanted asset transfers during option creation.
 
 ## 🎯 Problem Solved
 

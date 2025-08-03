@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  options-backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: options-protocol-backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    env_file:
+      - ../.env
+    volumes:
+      - options_data:/app/data
+      - options_logs:/app/logs
+    networks:
+      - options_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Nginx reverse proxy (optional)
+  nginx:
+    image: nginx:alpine
+    container_name: options-protocol-nginx
+    restart: unless-stopped  
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - options-backend
+    networks:
+      - options_network
+
+volumes:
+  options_data:
+    driver: local
+  options_logs:
+    driver: local
+
+networks:
+  options_network:
+    driver: bridge

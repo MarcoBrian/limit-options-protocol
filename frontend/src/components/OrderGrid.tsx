@@ -125,7 +125,7 @@ const OrderGrid: React.FC = () => {
         };
         console.log('   Request Body:', requestBody);
         
-        const response = await fetch(`http://localhost:3000/api/orders/${orderHash}/filled`, {
+        const response = await fetch(`${process.env.REACT_APP_API_URL || 'http://localhost:3000'}/api/orders/${orderHash}/filled`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

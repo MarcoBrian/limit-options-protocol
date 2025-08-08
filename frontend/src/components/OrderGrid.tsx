@@ -155,7 +155,18 @@ const OrderGrid: React.FC = () => {
       
     } catch (error: any) {
       console.error('❌ Buy option failed:', error);
-      showToast(`Failed to buy option: ${error.message}`, 'error');
+      
+      // If it's the "already used" error, refresh orders automatically
+      if (error.message?.includes('already been purchased') || 
+          error.message?.includes('Option order already used')) {
+        showToast(`${error.message}`, 'warning');
+        console.log('🔄 Auto-refreshing orders due to stale data...');
+        setTimeout(() => {
+          fetchOrders(); // Auto-refresh after 1 second
+        }, 1000);
+      } else {
+        showToast(`Failed to buy option: ${error.message}`, 'error');
+      }
     } finally {
       // Clean up loading state
       setFillingOrders(prev => {

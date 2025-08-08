@@ -14,6 +14,12 @@ const ERC20_ABI = [
   "function balanceOf(address account) external view returns (uint256)"
 ];
 
+// OptionsNFT ABI for checking order hash availability
+const OPTIONS_NFT_ABI = [
+  "function isOrderHashAvailable(bytes32 orderHash) external view returns (bool)",
+  "function generateOptionHash(address underlyingAsset, address strikeAsset, address maker, uint256 strikePrice, uint256 expiry, uint256 amount, uint256 salt) external view returns (bytes32)"
+];
+
 /**
  * Calculate taker traits from interaction data length
  */
@@ -104,6 +110,58 @@ async function approveUSDC(
 }
 
 /**
+ * Check if an option order is still available on-chain
+ */
+async function checkOptionOrderAvailability(
+  signer: ethers.Signer,
+  order: any,
+  optionsNFTAddress: string
+): Promise<{ available: boolean; reason?: string }> {
+  try {
+    // Only check for option orders (orders with optionParams)
+    if (!order.optionParams) {
+      return { available: true }; // Regular LOP orders don't use this check
+    }
+    
+    const optionsNFTContract = new ethers.Contract(
+      optionsNFTAddress,
+      OPTIONS_NFT_ABI,
+      signer
+    );
+    
+    const optionParams = order.optionParams;
+    const optionHash = await optionsNFTContract.generateOptionHash(
+      optionParams.underlyingAsset,
+      optionParams.strikeAsset,
+      order.maker,
+      optionParams.strikePrice,
+      optionParams.expiry,
+      optionParams.amount,
+      order.options_nft_salt || order.optionsNFTSalt || '0'
+    );
+    
+    const isAvailable = await optionsNFTContract.isOrderHashAvailable(optionHash);
+    
+    console.log(`🔍 Option Hash: ${optionHash}`);
+    console.log(`🔍 Is Available On-Chain: ${isAvailable}`);
+    
+    if (!isAvailable) {
+      return { 
+        available: false, 
+        reason: 'Option order has already been purchased by someone else' 
+      };
+    }
+    
+    return { available: true };
+    
+  } catch (error) {
+    console.error('Error checking option order availability:', error);
+    // Don't block the transaction on check failure, just warn
+    return { available: true };
+  }
+}
+
+/**
  * Check user's USDC balance
  */
 async function checkUSDCBalance(
@@ -155,6 +213,21 @@ export async function fillOrder(
     console.log('   ✅ Signature components ready');
     console.log('   🔍 Fill amount:', fillAmount.toString());
     console.log('   🔍 Taker traits:', takerTraits.toString());
+    
+    // Step 1.5: Check if option order is still available on-chain (for option orders only)
+    console.log('📋 Step 1.5: Checking option order availability...');
+    onProgress?.('Checking order availability...');
+    
+    const availability = await checkOptionOrderAvailability(
+      signer,
+      order,
+      contractAddresses.optionsNFTAddress
+    );
+    
+    if (!availability.available) {
+      throw new Error(availability.reason || 'Option order is no longer available');
+    }
+    console.log('   ✅ Option order is available on-chain');
     
     // Step 2: Check USDC balance
     console.log('📋 Step 2: Checking USDC balance...');
@@ -273,6 +346,8 @@ export async function fillOrder(
       errorMessage = 'Insufficient USDC balance';
     } else if (error.message?.includes('nonce')) {
       errorMessage = 'Transaction nonce error. Please try again.';
+    } else if (error.message?.includes('Option order already used')) {
+      errorMessage = 'This option has already been purchased by someone else. Please refresh the page to see updated orders.';
     }
     
     throw new Error(errorMessage);

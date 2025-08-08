@@ -348,6 +348,21 @@ router.post('/:orderHash/filled', validateOrderHash, async (req, res) => {
     
     // Check if order is still open
     if (order.status !== 'open') {
+      // If someone else already marked it as filled, return success anyway
+      if (order.status === 'filled') {
+        console.log(`ℹ️ Order ${orderHash} already marked as filled`);
+        return res.json({
+          success: true,
+          message: 'Order already marked as filled',
+          data: {
+            orderHash,
+            status: 'filled',
+            txHash: order.txHash || txHash,  // Use existing txHash if available
+            taker: order.taker || taker
+          }
+        });
+      }
+      
       return res.status(400).json({
         error: 'Order already processed',
         message: `Order status is ${order.status}`

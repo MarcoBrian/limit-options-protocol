@@ -7,25 +7,30 @@ export class OrderHashManager {
   private usedSalts: Set<string> = new Set();
 
   generateUniqueSalt(makerAddress: string, optionParams: any): string {
+    // Add randomness and timestamp to ensure uniqueness
     const saltData = {
       maker: makerAddress,
       underlyingAsset: optionParams.underlyingAsset,
       strikeAsset: optionParams.strikeAsset,
       strikePrice: optionParams.strikePrice.toString(),
       expiry: optionParams.expiry,
-      optionAmount: optionParams.optionAmount.toString()
+      optionAmount: optionParams.optionAmount.toString(),
+      timestamp: Date.now(), // Add current timestamp for uniqueness
+      random: Math.floor(Math.random() * 1000000) // Add random component
     };
 
     const saltHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(saltData)));
     // Use the same modulo as backend to ensure compatibility but avoid overflow
     const salt = ethers.getBigInt(saltHash) % ethers.getBigInt("0xffffffffffffffffffffffffffffffffffffffff");
 
-    // Ensure uniqueness
+    // Ensure uniqueness in this session
     if (this.usedSalts.has(salt.toString())) {
-      return this.generateUniqueSalt(makerAddress, { ...optionParams, expiry: optionParams.expiry + 1n });
+      // If collision (very unlikely with timestamp + random), try again with different random
+      return this.generateUniqueSalt(makerAddress, { ...optionParams, timestamp: Date.now() + 1 });
     }
 
     this.usedSalts.add(salt.toString());
+    console.log(`🔄 Generated salt: ${salt.toString()}`);
     return salt.toString(); // Return as string like backend
   }
 }
